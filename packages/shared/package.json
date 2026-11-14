@@ -1,0 +1,16 @@
+{
+  "name": "@oto/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "跨端共享的类型定义、常量、工具函数与 API SDK",
+  "type": "module",
+  "exports": {
+    "./api": "./src/api/index.ts"
+  },
+  "scripts": {
+    "generate:api": "node scripts/generate-api.mjs"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0"
+  }
+}

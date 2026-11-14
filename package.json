@@ -11,5 +11,8 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "scripts": {
+    "generate:api": "npm run generate:api --workspace @oto/shared"
   }
 }

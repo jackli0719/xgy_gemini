@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps test test-unit test-file
+.PHONY: help up down logs ps test test-unit test-file openapi
 
 COMPOSE_FILE := infra/compose/docker-compose.dev.yml
 COMPOSE_PORTS_FILE := infra/compose/docker-compose.dev.ports.yml
@@ -60,3 +60,12 @@ test-file: ## 只跑指定测试文件（例：make test-file FILE=tests/api/tes
 	@test -f .env || { echo "缺少 .env，请先执行 cp .env.example .env 并填写必填项"; exit 1; }
 	@test -n "$(FILE)" || { echo "缺少 FILE 参数。例：make test-file FILE=tests/api/test_orders.py"; exit 1; }
 	$(call run_tests,pytest $(FILE) $(PYTEST_ARGS))
+
+# 导出 OpenAPI 契约到 apps/api/openapi.json（前端据此生成类型）。
+# 在容器里跑：跟测试同一个镜像环境，导出的 schema 与测试断言的 schema
+# 一定是同一份（本地 Python 版本不一样时不会导出成另一套）。
+# --no-deps：导契约不碰数据库，不用起 postgres / redis。
+# 源码是挂载进容器的（见 compose 的 volumes），写出来的 openapi.json 直接落到宿主机。
+openapi: ## 导出 OpenAPI 契约到 apps/api/openapi.json
+	@test -f .env || { echo "缺少 .env，请先执行 cp .env.example .env 并填写必填项"; exit 1; }
+	$(COMPOSE) --profile test run --rm --no-deps api-test python -m app.scripts.export_openapi
