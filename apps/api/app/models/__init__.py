@@ -17,6 +17,7 @@ from app.models.enums import (
 )
 from app.models.order import Order, OrderStatusLog
 from app.models.provider import Master, ServiceProvider
+from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "OrderStatusLog",
     "PayStatus",
     "ProviderStatus",
+    "ScheduleSlot",
     "ServiceCategory",
     "ServiceItem",
     "ServiceProvider",
