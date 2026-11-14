@@ -23,6 +23,8 @@ from fastapi.responses import JSONResponse
 from app.domain.slot_rule import SlotInvalidError, SlotNotReservableError
 from app.services.errors import (
     AddressNotFoundError,
+    CatalogError,
+    CatalogNotFoundError,
     DispatchError,
     DispatchForbiddenError,
     InvalidOrderStateError,
@@ -48,12 +50,14 @@ from app.services.errors import (
 )
 
 __all__ = [
+    "CATALOG_GENERIC_DETAIL",
     "DISPATCH_GENERIC_DETAIL",
     "EXCEPTION_STATUS_MAP",
     "GENERIC_DETAIL",
     "MASTER_ACTION_GENERIC_DETAIL",
     "SERVICE_FLOW_GENERIC_DETAIL",
     "SETTLEMENT_GENERIC_DETAIL",
+    "catalog_error_handler",
     "dispatch_error_handler",
     "master_action_error_handler",
     "place_order_error_handler",
@@ -101,12 +105,15 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     SettlementNotFoundError: 404,
     # 结算确认：内部一致性被打破（服务端 bug，不是客户端的问题）
     SettlementInvariantError: 500,
+    # 目录查询：品类不存在，或已停用（「不存在」与「已停用」共用一句话）
+    CatalogNotFoundError: 404,
     # 兜底：其余业务异常
     PlaceOrderError: 400,
     DispatchError: 400,
     MasterActionError: 400,
     ServiceFlowError: 400,
     SettlementError: 400,
+    CatalogError: 400,
 }
 
 # 兜底文案。用于 PlaceOrderError 基类——它的消息可能内嵌数据库错误原文
@@ -124,6 +131,9 @@ SERVICE_FLOW_GENERIC_DETAIL = "操作失败"
 
 # 结算确认的兜底文案
 SETTLEMENT_GENERIC_DETAIL = "结算确认失败"
+
+# 目录查询的兜底文案
+CATALOG_GENERIC_DETAIL = "查询失败"
 
 
 def status_for(exc: BaseException) -> int:
@@ -220,3 +230,19 @@ def _detail_for(exc: BaseException) -> str:
     if type(exc) is PlaceOrderError:
         return GENERIC_DETAIL
     return str(exc) or GENERIC_DETAIL
+
+
+async def catalog_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把目录查询相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = (
+        CATALOG_GENERIC_DETAIL
+        if type(exc) is CatalogError
+        else (str(exc) or CATALOG_GENERIC_DETAIL)
+    )
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )

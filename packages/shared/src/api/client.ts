@@ -33,6 +33,11 @@ type SuccessStatus = 200 | 201;
 /** 取某个 operation 的路径参数。 */
 export type PathParamsOf<Op> = Op extends { parameters: { path: infer P } } ? P : Record<string, never>;
 
+/** 取某个 operation 的查询参数（没有查询参数的接口是 never）。 */
+export type QueryParamsOf<Op> = Op extends { parameters: { query?: infer Q } }
+  ? NonNullable<Q>
+  : Record<string, never>;
+
 /** 取某个 operation 的请求体（没有请求体时是 never）。 */
 export type RequestBodyOf<Op> = Op extends {
   requestBody: { content: { "application/json": infer B } };
@@ -86,6 +91,11 @@ type RejectOrderOp = operations["reject_order_api_v1_orders__order_no__reject_po
 type DispatchOrderOp = operations["dispatch_order_api_v1_orders__order_id__dispatch_post"];
 type ConfirmSettlementOp = operations["confirm_settlement_api_v1_settlements__settlement_id__confirm_post"];
 type MockPayNotifyOp = operations["mock_pay_notify_api_v1_pay_mock_notify_post"];
+type ListCategoriesOp = operations["list_categories_api_v1_catalog_get"];
+type ListCategoryItemsOp = operations["list_category_items_api_v1_catalog__category_id__items_get"];
+type ListItemSlotsOp = operations["list_item_slots_api_v1_items__item_id__slots_get"];
+type ListMyOrdersOp = operations["list_my_orders_api_v1_orders_get"];
+type GetMyOrderOp = operations["get_my_order_api_v1_orders__order_no__get"];
 
 /** 从错误响应体里挑出文案。 */
 function detailOf(body: unknown): string | undefined {
@@ -98,6 +108,23 @@ function detailOf(body: unknown): string | undefined {
   return undefined;
 }
 
+/** 拼查询串：undefined 的参数不拼（等于不传这个参数）。 */
+function buildUrl(
+  baseUrl: string,
+  path: string,
+  query?: Record<string, string | number | undefined>,
+): string {
+  if (!query) return `${baseUrl}${path}`;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined) continue;
+    params.set(key, String(value));
+  }
+  const search = params.toString();
+  if (!search) return `${baseUrl}${path}`;
+  return `${baseUrl}${path}${path.includes("?") ? "&" : "?"}${search}`;
+}
+
 export function createApiClient(options: ApiClientOptions = {}) {
   const baseUrl = options.baseUrl ?? "";
   const doFetch = options.fetch ?? globalThis.fetch;
@@ -105,7 +132,10 @@ export function createApiClient(options: ApiClientOptions = {}) {
   async function send<Op>(
     method: string,
     path: string,
-    init: { body?: RequestBodyOf<Op> } = {},
+    init: {
+      body?: RequestBodyOf<Op>;
+      query?: Record<string, string | number | undefined>;
+    } = {},
   ): Promise<ResponseOf<Op>> {
     const headers: Record<string, string> = { ...options.headers };
     const token = await options.getToken?.();
@@ -117,7 +147,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
       payload = JSON.stringify(init.body);
     }
 
-    const response = await doFetch(`${baseUrl}${path}`, {
+    const response = await doFetch(`${buildUrl(baseUrl, path, init.query)}`, {
       method,
       headers,
       body: payload,
@@ -220,6 +250,55 @@ export function createApiClient(options: ApiClientOptions = {}) {
       body: RequestBodyOf<MockPayNotifyOp>,
     ): Promise<ResponseOf<MockPayNotifyOp>> {
       return send<MockPayNotifyOp>("POST", "/api/v1/pay/mock-notify", { body });
+    },
+
+    // -----------------------------------------------------------------
+    // 只读查询
+    // -----------------------------------------------------------------
+
+    /** 品类树（一级品类 + 递归子品类）。 */
+    listCategories(): Promise<ResponseOf<ListCategoriesOp>> {
+      return send<ListCategoriesOp>("GET", "/api/v1/catalog");
+    },
+
+    /** 某品类下的服务项（只含直接归属该品类的）。 */
+    listCategoryItems(
+      params: PathParamsOf<ListCategoryItemsOp>,
+    ): Promise<ResponseOf<ListCategoryItemsOp>> {
+      return send<ListCategoryItemsOp>(
+        "GET",
+        `/api/v1/catalog/${encodeURIComponent(String(params.category_id))}/items`,
+      );
+    },
+
+    /** 某服务项某天的可预约时段（只返回 available > 0 的）。 */
+    listItemSlots(params: {
+      item_id: number;
+      /** YYYY-MM-DD */
+      date: string;
+    }): Promise<ResponseOf<ListItemSlotsOp>> {
+      return send<ListItemSlotsOp>(
+        "GET",
+        `/api/v1/items/${encodeURIComponent(String(params.item_id))}/slots`,
+        { query: { date: params.date } },
+      );
+    },
+
+    /** 我的订单列表（后端 limit 上限 100，超过按 100 算）。 */
+    listMyOrders(
+      params: QueryParamsOf<ListMyOrdersOp> = {},
+    ): Promise<ResponseOf<ListMyOrdersOp>> {
+      return send<ListMyOrdersOp>("GET", "/api/v1/orders", {
+        query: { limit: params.limit, offset: params.offset },
+      });
+    },
+
+    /** 订单详情（只能看自己的，别人的返回 404）。 */
+    getMyOrder(params: PathParamsOf<GetMyOrderOp>): Promise<ResponseOf<GetMyOrderOp>> {
+      return send<GetMyOrderOp>(
+        "GET",
+        `/api/v1/orders/${encodeURIComponent(params.order_no)}`,
+      );
     },
 
     /**

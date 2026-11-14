@@ -10,6 +10,8 @@ from __future__ import annotations
 
 __all__ = [
     "AddressNotFoundError",
+    "CatalogError",
+    "CatalogNotFoundError",
     "DispatchError",
     "DispatchForbiddenError",
     "InvalidOrderStateError",
@@ -197,4 +199,21 @@ class SettlementInvariantError(SettlementError):
     唯一的触发场景：结算单被确认了，但关联订单没能全部从「待结算」
     流转到「已结算」——明细里的订单不在「待结算」状态，或明细跟订单对不上。
     这是数据坏了，必须暴露成 500，不能伪装成「结算单不存在」。
+    """
+
+
+class CatalogError(Exception):
+    """目录查询（品类 / 服务项 / 时段）失败的业务异常基类。
+
+    与前五棵异常树（PlaceOrderError / DispatchError / MasterActionError /
+    ServiceFlowError / SettlementError）平级：目录查询是独立的一条链路，
+    共用一个基类会让「下单失败」的兜底文案套到目录错误上。
+    """
+
+
+class CatalogNotFoundError(CatalogError):
+    """品类不存在，或已停用。
+
+    「不存在」与「已停用」共用同一个异常、同一句话——
+    否则调用方能靠报错差异探测某个品类存不存在、是不是下架了。
     """

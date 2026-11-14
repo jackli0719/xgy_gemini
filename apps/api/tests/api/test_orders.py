@@ -42,6 +42,8 @@ from app.models.user import User
 from app.schemas.order import PlaceOrderRequest
 from app.services.errors import (
     AddressNotFoundError,
+    CatalogError,
+    CatalogNotFoundError,
     DispatchError,
     DispatchForbiddenError,
     InvalidOrderStateError,
@@ -182,11 +184,14 @@ def test_exception_status_map_contents() -> None:
         SettlementForbiddenError: 403,
         SettlementNotFoundError: 404,
         SettlementInvariantError: 500,
+        # 目录查询（品类 / 服务项 / 时段）
+        CatalogNotFoundError: 404,
         PlaceOrderError: 400,
         DispatchError: 400,
         MasterActionError: 400,
         ServiceFlowError: 400,
         SettlementError: 400,
+        CatalogError: 400,
     }
 
 
