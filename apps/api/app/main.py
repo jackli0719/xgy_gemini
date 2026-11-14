@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.api.v1.errors import place_order_error_handler
 from app.api.v1.orders import router as orders_router
+from app.api.v1.pay import router as pay_router
 from app.domain.slot_rule import SlotError
 from app.services.errors import PlaceOrderError
 
@@ -19,6 +20,7 @@ app = FastAPI(
 )
 
 app.include_router(orders_router)
+app.include_router(pay_router)
 
 # 异常映射：service / domain 的业务异常 -> HTTP 状态码。
 # 注册在两个基类上，子类按 MRO 自动命中（OrderNoConflictError 命中 503，

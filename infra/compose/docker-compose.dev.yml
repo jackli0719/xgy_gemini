@@ -82,7 +82,7 @@ services:
       # 守卫开关：集成测试不许静默 skip（见 apps/api/tests/conftest.py）
       REQUIRE_INTEGRATION: "1"
       # 集成测试数量下限，少于这个数说明测试没被收集到，直接判失败
-      EXPECTED_INTEGRATION_TESTS: "16"
+      EXPECTED_INTEGRATION_TESTS: "24"
       # JWT 验签配置：鉴权依赖（app/core/auth.py）读这三个。
       # 容器里读不到仓库根的 .env（app/core/config.py 的 env_file 在容器内指向
       # 不存在的路径），所以必须显式传进来。JWT_SECRET 缺失直接报错，
@@ -93,6 +93,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:?缺少 JWT_SECRET，请在根目录 .env 里填写（至少 32 字节）}
       JWT_ALG: ${JWT_ALG:-HS256}
       JWT_ACCESS_EXPIRE_MINUTES: ${JWT_ACCESS_EXPIRE_MINUTES:-120}
+      # 应用环境：决定 mock 支付回调接口（/api/v1/pay/mock-notify）开不开放。
+      # 测试要跑这个接口，所以显式传 dev；不给的话 app/core/config.py 的默认值
+      # 是 prod（fail-closed），mock 接口会被 403 掉。
+      APP_ENV: ${APP_ENV:-dev}
     volumes:
       # 挂载源码：改代码后重跑不必重建镜像
       - ../../apps/api:/app/apps/api

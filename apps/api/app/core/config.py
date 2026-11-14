@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     db_echo: bool = False
     db_pool_size: int = 10
 
+    # 应用环境：dev / prod / staging。
+    # 决定开发专用接口（如 app/api/v1/pay.py 的 mock 支付回调）是否开放。
+    # 默认按生产对待（fail-closed）：没显式配 APP_ENV 时，mock 接口是关的。
+    app_env: str = "prod"
+
     # JWT：鉴权依赖（app.core.auth）用这组配置验签
     jwt_secret: str
     jwt_alg: str = "HS256"

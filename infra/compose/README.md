@@ -46,6 +46,7 @@ docker compose --env-file .env -f infra/compose/docker-compose.dev.yml \
 - **集成测试不许静默 skip**：容器里设了 `REQUIRE_INTEGRATION=1`，只要有集成测试被 skip（或一个都没收集到），pytest 就判失败。守卫逻辑在 `apps/api/tests/conftest.py`。
 - **插值读根目录 `.env`**：Makefile 里用 `docker compose --env-file .env`，compose 的 `${...}` 才会取到 `.env` 的真实值。不加的话会退回默认的 `oto/oto/oto`，与 `.env` 里 `DATABASE_URL` 的密码对不上。
 - **容器里读不到仓库根的 `.env`**：`app/core/config.py` 按文件路径上溯找 `.env`，容器里那个路径不存在，所以应用配置全靠环境变量注入。`api-test` 服务显式传了 `JWT_SECRET` / `JWT_ALG`（鉴权依赖 `app/core/auth.py` 验签要用），缺 `JWT_SECRET` 时 compose 直接报错，不会用空密钥把服务起起来。
+- **`APP_ENV` 决定 mock 接口开不开放**：`app/core/config.py` 的 `app_env` 默认是 `prod`（fail-closed，没配就是生产环境），只有 `dev` 才开放 mock 支付回调 `/api/v1/pay/mock-notify`。容器里读不到根 `.env`，所以 `api-test` 显式传 `APP_ENV: ${APP_ENV:-dev}`——测试要跑这个接口。
 - **`POSTGRES_PORT` / `REDIS_PORT`**：宿主机映射端口可改（本机 5432 / 6379 常被别的容器占用）。只影响宿主机端口，容器内仍是 5432 / 6379。这两项在 `make up` 时生效；`make test` 不发布端口，因此用不到。
 - **`make test` 会自适应选 compose 文件**：
   - 开发栈正在跑、且它的 postgres 已经发布了宿主机端口 → 用叠加端口层的那套，配置与运行中的容器一致，

@@ -23,9 +23,11 @@ from fastapi.responses import JSONResponse
 from app.domain.slot_rule import SlotInvalidError, SlotNotReservableError
 from app.services.errors import (
     AddressNotFoundError,
+    InvalidOrderStateError,
     ItemInactiveError,
     ItemNotFoundError,
     OrderNoConflictError,
+    OrderNotFoundError,
     PlaceOrderError,
     SlotItemMismatchError,
     SlotNotFoundError,
@@ -46,12 +48,14 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     AddressNotFoundError: 404,
     ItemNotFoundError: 404,
     SlotNotFoundError: 404,
+    OrderNotFoundError: 404,
     # 状态冲突
     ItemInactiveError: 409,
     SlotNotInFutureError: 409,
     SlotItemMismatchError: 409,
     SlotInvalidError: 409,
     SlotNotReservableError: 409,
+    InvalidOrderStateError: 409,
     # 订单号重试上限内仍冲突：服务端问题，重试有意义
     OrderNoConflictError: 503,
     # 兜底：其余业务异常

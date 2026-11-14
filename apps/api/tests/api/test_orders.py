@@ -42,9 +42,11 @@ from app.models.user import User
 from app.schemas.order import PlaceOrderRequest
 from app.services.errors import (
     AddressNotFoundError,
+    InvalidOrderStateError,
     ItemInactiveError,
     ItemNotFoundError,
     OrderNoConflictError,
+    OrderNotFoundError,
     PlaceOrderError,
     SlotItemMismatchError,
     SlotNotFoundError,
@@ -140,11 +142,13 @@ def test_exception_status_map_contents() -> None:
         AddressNotFoundError: 404,
         ItemNotFoundError: 404,
         SlotNotFoundError: 404,
+        OrderNotFoundError: 404,
         ItemInactiveError: 409,
         SlotNotInFutureError: 409,
         SlotItemMismatchError: 409,
         SlotInvalidError: 409,
         SlotNotReservableError: 409,
+        InvalidOrderStateError: 409,
         OrderNoConflictError: 503,
         PlaceOrderError: 400,
     }

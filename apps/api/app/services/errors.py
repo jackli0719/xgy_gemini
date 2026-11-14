@@ -10,9 +10,11 @@ from __future__ import annotations
 
 __all__ = [
     "AddressNotFoundError",
+    "InvalidOrderStateError",
     "ItemInactiveError",
     "ItemNotFoundError",
     "OrderNoConflictError",
+    "OrderNotFoundError",
     "PlaceOrderError",
     "SlotItemMismatchError",
     "SlotNotFoundError",
@@ -54,3 +56,14 @@ class SlotNotInFutureError(PlaceOrderError):
 
 class OrderNoConflictError(PlaceOrderError):
     """订单号连续冲突，重试上限内仍未拿到可用订单号。"""
+
+
+class OrderNotFoundError(PlaceOrderError):
+    """订单不存在。"""
+
+
+class InvalidOrderStateError(PlaceOrderError):
+    """订单当前状态不允许该操作。
+
+    例如订单已经不是「待支付」，却收到支付回调。
+    """
