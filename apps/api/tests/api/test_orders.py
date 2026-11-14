@@ -57,6 +57,10 @@ from app.services.errors import (
     ServiceFlowError,
     ServiceFlowForbiddenError,
     ServiceFlowInvariantError,
+    SettlementError,
+    SettlementForbiddenError,
+    SettlementInvariantError,
+    SettlementNotFoundError,
     SlotItemMismatchError,
     SlotNotFoundError,
     SlotNotInFutureError,
@@ -174,10 +178,15 @@ def test_exception_status_map_contents() -> None:
         # 服务流转（开工 / 完工 / 确认完成）
         ServiceFlowForbiddenError: 403,
         ServiceFlowInvariantError: 500,
+        # 结算确认（财务确认结算单）
+        SettlementForbiddenError: 403,
+        SettlementNotFoundError: 404,
+        SettlementInvariantError: 500,
         PlaceOrderError: 400,
         DispatchError: 400,
         MasterActionError: 400,
         ServiceFlowError: 400,
+        SettlementError: 400,
     }
 
 
