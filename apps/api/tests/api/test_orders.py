@@ -54,6 +54,10 @@ from app.services.errors import (
 ORDER_URL = "/api/v1/orders"
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
+# 用来伪造"别的密钥签的 token"。同样要满足 RFC 7518 对 HS256 的 32 字节下限，
+# 否则 PyJWT 会发 InsecureKeyLengthWarning，把真正的密钥长度问题淹没在噪声里。
+_WRONG_SECRET = "wrong-secret-for-negative-tests-only-0123456789abcdef"
+
 
 # =====================================================================
 # 公共小工具
@@ -223,7 +227,7 @@ async def test_token_signed_with_wrong_secret_returns_401(client) -> None:
         "sub": "1",
         "exp": int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()),
     }
-    forged = jwt.encode(payload, "another-secret", algorithm=settings.jwt_alg)
+    forged = jwt.encode(payload, _WRONG_SECRET, algorithm=settings.jwt_alg)
     response = await client.post(
         ORDER_URL,
         json={"item_id": 1, "slot_id": 2, "address_id": 3},
@@ -251,7 +255,7 @@ async def test_all_401_responses_share_the_same_detail(client) -> None:
             "sub": "1",
             "exp": int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()),
         },
-        "another-secret",
+        _WRONG_SECRET,
         algorithm=settings.jwt_alg,
     )
     cases = [

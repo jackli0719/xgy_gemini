@@ -87,7 +87,10 @@ services:
       # 容器里读不到仓库根的 .env（app/core/config.py 的 env_file 在容器内指向
       # 不存在的路径），所以必须显式传进来。JWT_SECRET 缺失直接报错，
       # 免得用空密钥把服务起起来。
-      JWT_SECRET: ${JWT_SECRET:?缺少 JWT_SECRET，请在根目录 .env 里填写}
+      # 长度要求：至少 32 字节（RFC 7518 HS256）。compose 插值只能判断"有没有"，
+      # 判不了"够不够长"——长度由 app/core/config.py 的 field_validator 在启动时
+      # 强制，短密钥会直接抛 ValueError 拒绝启动。
+      JWT_SECRET: ${JWT_SECRET:?缺少 JWT_SECRET，请在根目录 .env 里填写（至少 32 字节）}
       JWT_ALG: ${JWT_ALG:-HS256}
       JWT_ACCESS_EXPIRE_MINUTES: ${JWT_ACCESS_EXPIRE_MINUTES:-120}
     volumes:
