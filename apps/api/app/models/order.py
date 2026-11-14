@@ -30,6 +30,8 @@ class Order(Base, TimestampMixin):
         # 服务商端按「服务商 + 状态」过滤订单
         Index("ix_order_provider_status", "provider_id", "status"),
         Index("ix_order_user_id", "user_id"),
+        # 按预约时段查订单
+        Index("ix_order_slot_id", "slot_id"),
         CheckConstraint("amount >= 0", name="ck_order_amount"),
     )
 
@@ -59,6 +61,13 @@ class Order(Base, TimestampMixin):
     item_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("service_item.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # 预约的时段库存。订单必须绑定到具体的一格时段，
+    # (item_id, date, start_time) 无法唯一定位（同服务项一天多格）。
+    slot_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("schedule_slot.id", ondelete="RESTRICT"),
         nullable=False,
     )
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
