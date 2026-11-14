@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps test test-unit
+.PHONY: help up down logs ps test test-unit test-file
 
 COMPOSE_FILE := infra/compose/docker-compose.dev.yml
 COMPOSE_PORTS_FILE := infra/compose/docker-compose.dev.ports.yml
@@ -50,3 +50,13 @@ test: ## 在容器里跑全部测试（单元 + 集成；集成测试必须真�
 test-unit: ## 只跑单元测试（集成测试会被过滤掉，输出里会打印跳过了几个）
 	@test -f .env || { echo "缺少 .env，请先执行 cp .env.example .env 并填写必填项"; exit 1; }
 	$(call run_tests,pytest -m "not integration")
+
+# 只跑指定文件：开发迭代时用，不跑全量。
+# 守卫：指定了路径就算「部分运行」，「集成测试数下限」那条守卫不生效
+# （见 apps/api/tests/conftest.py），但「集成测试不许静默 skip」仍然生效。
+# 例：make test-file FILE=tests/services/test_auto_confirm.py
+#     make test-file FILE=tests/api/test_orders.py PYTEST_ARGS="-k dispatch"
+test-file: ## 只跑指定测试文件（例：make test-file FILE=tests/api/test_orders.py）
+	@test -f .env || { echo "缺少 .env，请先执行 cp .env.example .env 并填写必填项"; exit 1; }
+	@test -n "$(FILE)" || { echo "缺少 FILE 参数。例：make test-file FILE=tests/api/test_orders.py"; exit 1; }
+	$(call run_tests,pytest $(FILE) $(PYTEST_ARGS))

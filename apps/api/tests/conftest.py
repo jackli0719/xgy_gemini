@@ -15,11 +15,18 @@
   有集成测试被 skip、或一个都没收集到，直接判整场失败。
 - ``EXPECTED_INTEGRATION_TESTS=N``：集成测试数量下限。
 - ``TEST_DATABASE_URL``：集成测试用的库地址。
+
+**全量运行 vs 部分运行**：``EXPECTED_INTEGRATION_TESTS`` 这条「数量下限」
+只在**全量运行**时生效。只跑一个文件（``pytest tests/xxx.py``）或用了
+``-k`` / ``-m`` 过滤时，跑到的用例本来就比全量少，拿全量的下限去卡它
+是误报——这条守卫的本意是发现「测试整体消失」，不是发现「这次跑少了」。
+部分运行时仍然守的是「不许静默 skip」：收集到的集成测试必须真的执行。
 """
 from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pytest
@@ -31,6 +38,9 @@ _collected: set[str] = set()  # 选中且会跑的
 _deselected: set[str] = set()  # 被 -m "not integration" 过滤掉的
 _skipped: set[str] = set()  # 选中但被 skip 的
 _executed: set[str] = set()  # 真正跑了的（通过或失败）
+
+# 这次是不是全量运行（决定「集成测试数下限」这条守卫是否生效）
+_is_full_run = True
 
 # 守卫判定出的问题，留到终端摘要里打印
 _problems: list[str] = []
@@ -91,7 +101,9 @@ def _guard_problems() -> list[str]:
     expected = _env_int("EXPECTED_INTEGRATION_TESTS")
 
     if _env_flag("REQUIRE_INTEGRATION"):
-        if total == 0:
+        # 「一个都没收集到」只在全量运行时是问题：
+        # 部分运行本来就没打算收集全部
+        if _is_full_run and total == 0:
             problems.append(
                 "一个集成测试都没收集到（marker={} 的用例数为 0）".format(
                     INTEGRATION_MARKER
@@ -103,7 +115,9 @@ def _guard_problems() -> list[str]:
                     len(_skipped), ", ".join(sorted(_skipped))
                 )
             )
-        if expected is not None and total < expected:
+        # 「数量下限」同样只在全量运行时生效：
+        # 只跑一部分时用例数本来就比下限少，拿下限卡它是误报
+        if _is_full_run and expected is not None and total < expected:
             problems.append(
                 "集成测试数 {} 少于预期下限 {}".format(total, expected)
             )
@@ -144,8 +158,15 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
                 len(_deselected)
             )
         )
+    if not _is_full_run:
+        # 部分运行：说清楚哪条守卫没生效，别让人以为下限也查过了
+        terminalreporter.write_line(
+            "本次是部分运行（指定了路径或用了 -k / -m 过滤）："
+            "「集成测试数下限」守卫未生效；"
+            "「集成测试不许静默 skip」守卫仍然生效"
+        )
     expected = _env_int("EXPECTED_INTEGRATION_TESTS")
-    if expected is not None and total > expected:
+    if _is_full_run and expected is not None and total > expected:
         terminalreporter.write_line(
             "提示：集成测试数 {} 已超过 EXPECTED_INTEGRATION_TESTS={}，"
             "新增集成测试后请同步更新该值".format(total, expected)
@@ -162,8 +183,61 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
 # =====================================================================
 def pytest_configure(config) -> None:
     """跑测试之前把测试库准备好，避免「库不存在 → 集成测试全 skip」。"""
+    global _is_full_run
+    _is_full_run = _detect_full_run(config)
     _ensure_test_database()
     _warn_same_database()
+
+
+def _detect_full_run(config) -> bool:
+    """判断这次是不是全量运行。
+
+    全量 = 命令行没缩小范围：没指定别的路径（跑的就是 pytest.ini 里的
+    ``testpaths`` 整棵测试树），也没用 ``-k`` / ``-m`` 过滤。
+
+    只指定了文件、或用了过滤表达式时，用例数本来就比全量少，
+    「集成测试数下限」那条守卫不适用（见文件头说明）。
+
+    注意 pytest 会把 ``testpaths`` 注入 ``config.args``，所以
+    「命令行没给路径」和「config.args 里是 tests」要分开看：
+    判据是「命令行给的路径有没有把 testpaths 整棵树盖住」。
+    """
+    positional = list(getattr(config, "args", None) or [])
+
+    keyword = config.getoption("keyword", default="") or ""
+    markexpr = config.getoption("markexpr", default="") or ""
+    if keyword or markexpr:
+        # 用了过滤表达式：跑到的用例是挑出来的
+        return False
+
+    if not positional:
+        # 命令行一个路径都没给：跑的就是全部
+        return True
+
+    try:
+        testpaths = [str(p) for p in (config.getini("testpaths") or [])]
+    except ValueError:
+        testpaths = []
+    if not testpaths:
+        # 没配 testpaths 时没法比对：命令行给了路径就是部分运行
+        return False
+
+    root = Path(str(config.rootpath)).resolve()
+    covered = [(root / p).resolve() for p in testpaths]
+    targets = []
+    for arg in positional:
+        try:
+            targets.append((root / arg).resolve())
+        except OSError:  # pragma: no cover - 路径解析不了就当部分运行
+            return False
+    # 命令行给的路径必须把每一棵 testpaths 都盖住，才算全量
+    # （target 盖住 testpath：两者相同，或 testpath 在 target 底下）
+    for testpath in covered:
+        if not any(
+            testpath == target or target in testpath.parents for target in targets
+        ):
+            return False
+    return True
 
 
 def _ensure_test_database() -> None:
