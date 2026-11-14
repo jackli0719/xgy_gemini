@@ -4,8 +4,8 @@ Revision ID: 0001_initial
 Revises:
 Create Date: 2026-11-14
 
-包含 8 张表：user / service_provider / master / service_category /
-service_item / address / order / order_status_log，
+包含 9 张表：user / service_provider / master / service_category /
+service_item / address / order / order_status_log / audit_log，
 以及 7 个 PostgreSQL 原生枚举类型。
 """
 from __future__ import annotations
@@ -367,10 +367,47 @@ def upgrade() -> None:
         "ix_order_status_log_order_id", "order_status_log", ["order_id"]
     )
 
+    # 10. audit_log
+    # 不可变审计记录：只追加，无 updated_at；不设物理外键，
+    # 用 target_type + target_id 软关联到被审计对象（对象删除后记录仍保留）
+    op.create_table(
+        "audit_log",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("operator_type", operator_type, nullable=False),
+        sa.Column("operator_id", sa.BigInteger(), nullable=False),
+        sa.Column("target_type", sa.String(length=64), nullable=False),
+        sa.Column("target_id", sa.BigInteger(), nullable=False),
+        sa.Column("provider_id", sa.BigInteger(), nullable=True),
+        sa.Column("field_name", sa.String(length=64), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+        sa.Column("reason", sa.Text(), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index(
+        "ix_audit_log_provider_created", "audit_log", ["provider_id", "created_at"]
+    )
+    op.create_index("ix_audit_log_target", "audit_log", ["target_type", "target_id"])
+    op.create_index(
+        "ix_audit_log_operator", "audit_log", ["operator_type", "operator_id"]
+    )
+
 
 def downgrade() -> None:
     op.drop_index("ix_order_status_log_order_id", table_name="order_status_log")
     op.drop_table("order_status_log")
+
+    # audit_log 无外键依赖，与业务表解耦，放在 order_status_log 之后 drop
+    op.drop_index("ix_audit_log_operator", table_name="audit_log")
+    op.drop_index("ix_audit_log_target", table_name="audit_log")
+    op.drop_index("ix_audit_log_provider_created", table_name="audit_log")
+    op.drop_table("audit_log")
 
     op.drop_index("ix_order_user_id", table_name="order")
     op.drop_index("ix_order_provider_status", table_name="order")

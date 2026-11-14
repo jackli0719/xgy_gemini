@@ -3,6 +3,7 @@
 Alembic 的 env.py 依赖本模块把全部模型注册进 Base.metadata。
 """
 from app.models.address import Address
+from app.models.audit_log import AuditLog
 from app.models.base import Base, CreatedAtMixin, TimestampMixin
 from app.models.catalog import ServiceCategory, ServiceItem
 from app.models.enums import (
@@ -20,6 +21,7 @@ from app.models.user import User
 
 __all__ = [
     "Address",
+    "AuditLog",
     "Base",
     "CatalogStatus",
     "CreatedAtMixin",

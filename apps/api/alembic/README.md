@@ -3,7 +3,7 @@
 Alembic 数据库迁移脚本，版本化管理 schema 变更。
 
 - `env.py` 从仓库根目录 `.env` 的 `DATABASE_URL` 取连接（异步 asyncpg 驱动）。
-- `versions/` 存放迁移脚本，首个迁移为 `0001_initial`（8 张表 + 7 个枚举类型）。
+- `versions/` 存放迁移脚本，首个迁移为 `0001_initial`（9 张表 + 7 个枚举类型）。
 - 常用命令（在 `apps/api` 目录下执行）：
 
 ```bash

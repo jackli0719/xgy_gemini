@@ -8,7 +8,7 @@ FastAPI 后端服务，承载用户端、师傅端、平台端、服务商端共
 apps/api/
 ├─ app/
 │  ├─ core/       配置（读根目录 .env）与异步数据库引擎
-│  └─ models/     SQLAlchemy ORM 模型（8 张表）
+│  └─ models/     SQLAlchemy ORM 模型（9 张表）
 └─ alembic/       迁移脚本，首个版本 0001_initial
 ```
 
