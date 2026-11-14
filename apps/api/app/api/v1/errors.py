@@ -38,6 +38,10 @@ from app.services.errors import (
     ServiceFlowError,
     ServiceFlowForbiddenError,
     ServiceFlowInvariantError,
+    SettlementError,
+    SettlementForbiddenError,
+    SettlementInvariantError,
+    SettlementNotFoundError,
     SlotItemMismatchError,
     SlotNotFoundError,
     SlotNotInFutureError,
@@ -49,10 +53,12 @@ __all__ = [
     "GENERIC_DETAIL",
     "MASTER_ACTION_GENERIC_DETAIL",
     "SERVICE_FLOW_GENERIC_DETAIL",
+    "SETTLEMENT_GENERIC_DETAIL",
     "dispatch_error_handler",
     "master_action_error_handler",
     "place_order_error_handler",
     "service_flow_error_handler",
+    "settlement_error_handler",
     "status_for",
 ]
 
@@ -87,11 +93,20 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     ServiceFlowForbiddenError: 403,
     # 服务流转：内部一致性被打破（服务端 bug，不是客户端的问题）
     ServiceFlowInvariantError: 500,
+    # 结算确认：角色不对 / 没有财务权限
+    SettlementForbiddenError: 403,
+    # 结算确认：结算单不存在，或已经不是「待结算」
+    # 「不存在」与「已被确认」共用同一个异常，响应也完全一样，
+    # 调用方无法靠报错差异探测结算单的状态
+    SettlementNotFoundError: 404,
+    # 结算确认：内部一致性被打破（服务端 bug，不是客户端的问题）
+    SettlementInvariantError: 500,
     # 兜底：其余业务异常
     PlaceOrderError: 400,
     DispatchError: 400,
     MasterActionError: 400,
     ServiceFlowError: 400,
+    SettlementError: 400,
 }
 
 # 兜底文案。用于 PlaceOrderError 基类——它的消息可能内嵌数据库错误原文
@@ -106,6 +121,9 @@ MASTER_ACTION_GENERIC_DETAIL = "操作失败"
 
 # 服务流转（开工 / 完工 / 确认完成）的兜底文案
 SERVICE_FLOW_GENERIC_DETAIL = "操作失败"
+
+# 结算确认的兜底文案
+SETTLEMENT_GENERIC_DETAIL = "结算确认失败"
 
 
 def status_for(exc: BaseException) -> int:
@@ -170,6 +188,22 @@ async def service_flow_error_handler(request: Request, exc: Exception) -> JSONRe
         SERVICE_FLOW_GENERIC_DETAIL
         if type(exc) is ServiceFlowError
         else (str(exc) or SERVICE_FLOW_GENERIC_DETAIL)
+    )
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )
+
+
+async def settlement_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把结算确认相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = (
+        SETTLEMENT_GENERIC_DETAIL
+        if type(exc) is SettlementError
+        else (str(exc) or SETTLEMENT_GENERIC_DETAIL)
     )
     return JSONResponse(
         status_code=status_for(exc),

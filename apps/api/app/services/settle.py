@@ -1,4 +1,4 @@
-"""T+1 待结算生成 service。
+"""T+1 待结算生成 + 财务确认结算 service。
 
 订单「已完成」之后，钱还没到服务商账上。订单完成当天就出结算单太早——
 客户可能还在投诉、工期可能有争议。所以规则是 **T+1**：完工满一天的订单
@@ -9,6 +9,9 @@
 - 佣金按 ``service_provider.commission_rate`` 算：
   ``commission = 合计 × 费率``，``net = 合计 - 佣金``（服务商实收）；
 - 逐笔条件 UPDATE 把订单转成「待结算」，并写入结算单、明细、状态流转日志、审计日志。
+
+另外还有 ``confirm_settlement``：平台财务确认一张结算单，
+结算单转「已确认」，关联订单转「已结算」，两处都留痕。
 
 三条硬约束：
 
@@ -44,14 +47,26 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import CurrentUser
 from app.domain.order_state import assert_transition
 from app.models.audit_log import AuditLog
-from app.models.enums import OperatorType, OrderStatus, SettlementStatus
+from app.models.enums import OperatorType, OrderStatus, SettlementStatus, UserRole
 from app.models.order import Order, OrderStatusLog
 from app.models.provider import ServiceProvider
 from app.models.settlement import Settlement, SettlementItem
+from app.services.errors import (
+    SettlementForbiddenError,
+    SettlementInvariantError,
+    SettlementNotFoundError,
+)
 
-__all__ = ["AUDIT_REASON", "SETTLE_REASON", "generate_pending_settlements"]
+__all__ = [
+    "AUDIT_REASON",
+    "CONFIRM_REASON",
+    "SETTLE_REASON",
+    "confirm_settlement",
+    "generate_pending_settlements",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +79,9 @@ SETTLE_REASON = "T+1 自动生成待结算"
 # 审计日志里留下的原因
 AUDIT_REASON = "T+1 结算单生成"
 
+# 财务确认结算时，状态流转日志与审计日志里留下的原因
+CONFIRM_REASON = "财务确认结算"
+
 # 审计日志里被审计对象的类型
 AUDIT_TARGET_TYPE = "settlement"
 
@@ -72,6 +90,13 @@ SYSTEM_OPERATOR_ID = 0
 
 # 金额精度：两位小数，四舍五入
 CENTS = Decimal("0.01")
+
+# 「结算单不存在」与「结算单已被确认」共用这一条消息。
+#
+# 消息里只回客户端自己给的 settlement_id，不含状态、金额、服务商归属，
+# 所以这两种失败在响应里完全一样，攻击者无法据此判断某张结算单
+# 是否真实存在、处于什么状态。
+_SETTLEMENT_NOT_FOUND_DETAIL = "结算单不存在：settlement_id={settlement_id}"
 
 
 async def generate_pending_settlements(
@@ -252,6 +277,158 @@ async def _settle_provider(
             )
 
     return len(claimed)
+
+
+async def confirm_settlement(
+    session: AsyncSession,
+    *,
+    current: CurrentUser,
+    settlement_id: int,
+) -> Settlement:
+    """财务确认结算单：PENDING -> CONFIRMED，关联订单 PENDING_SETTLE -> SETTLED。
+
+    确认的动作会把「钱要打给谁」定下来，所以比生成结算单更敏感：
+
+    1. **角色守卫**：只有 PLATFORM_FINANCE 能确认，且在碰库之前就挡住。
+       角色不对的账号连结算单存在与否都不该知道。
+    2. **条件 UPDATE**（``WHERE id=? AND status='PENDING'``）：
+       判定交给数据库的行锁裁决。两个财务同时确认同一张单，
+       只有一方能确认，另一方 404——不会重复确认、不会重复打款。
+    3. **rowcount == 0 一律 404 同构**：结算单不存在 / 已被确认 /
+       等待行锁期间被别人改走，三种情况抛同一个异常、同一句话。
+    4. **关联订单必须全部流转**：明细里的订单逐笔条件 UPDATE 到「已结算」，
+       影响行数必须等于明细条数——不等就说明数据对不上，
+       整体回滚并抛 SettlementInvariantError（500）。
+    5. **同一事务**：结算单状态 + 订单状态 + 状态流转日志 + 审计日志，
+       要么全成、要么全不成。
+
+    要求传入的 session 没有活动事务——本函数会自行管理事务生命周期。
+    """
+    _require_finance_role(current)
+
+    async with session.begin():
+        now = datetime.now(timezone.utc)
+
+        # 条件 UPDATE 认领结算单：只有还「待结算」的才动得了。
+        # 两个财务同时确认时，先拿到行锁的一方赢，另一方等锁期间
+        # 谓词已不成立 -> 影响 0 行 -> 404。
+        result = await session.execute(
+            update(Settlement)
+            .where(
+                Settlement.id == settlement_id,
+                Settlement.status == SettlementStatus.PENDING,
+            )
+            .values(
+                status=SettlementStatus.CONFIRMED,
+                confirmed_by=current.user_id,
+                confirmed_at=now,
+                # Core 的 UPDATE 不走 ORM 的 onupdate，得自己带上
+                updated_at=now,
+            )
+            .returning(Settlement.id, Settlement.provider_id)
+        )
+        claimed = result.first()
+        if claimed is None:
+            # 没命中。三种原因对调用方是同一件事——「这张单现在轮不到你」：
+            #   - 结算单不存在
+            #   - 结算单已经被确认过
+            #   - 等待行锁期间这一行被改走又改回
+            # 统一 404，不让调用方靠报错差异探测结算单的状态（R1）。
+            raise SettlementNotFoundError(
+                _SETTLEMENT_NOT_FOUND_DETAIL.format(settlement_id=settlement_id)
+            )
+        settlement_pk, provider_id = claimed[0], claimed[1]
+
+        # 这张结算单覆盖了哪些订单
+        item_order_ids = sorted(
+            (
+                await session.execute(
+                    select(SettlementItem.order_id).where(
+                        SettlementItem.settlement_id == settlement_pk
+                    )
+                )
+            ).scalars().all()
+        )
+
+        # 订单流转走状态机（R4）：PENDING_SETTLE -> SETTLED
+        assert_transition(OrderStatus.PENDING_SETTLE, OrderStatus.SETTLED)
+
+        # 逐笔条件 UPDATE 把订单推到「已结算」。
+        # 谓词带上「结算单 id」——订单表本身没有 settlement_id 列，
+        # 所以用明细表做子查询把范围限定在这张结算单上。
+        updated_ids = []
+        if item_order_ids:
+            updated = await session.execute(
+                update(Order)
+                .where(
+                    Order.id.in_(item_order_ids),
+                    Order.status == OrderStatus.PENDING_SETTLE,
+                )
+                .values(
+                    status=OrderStatus.SETTLED,
+                    # Core 的 UPDATE 不走 ORM 的 onupdate，得自己带上
+                    updated_at=now,
+                )
+                .returning(Order.id)
+            )
+            updated_ids = sorted(row[0] for row in updated.all())
+
+        if updated_ids != item_order_ids:
+            # 明细里有订单没能流转到「已结算」——数据对不上。
+            # 这是服务端数据坏了，必须暴露成 500 并整体回滚，
+            # 不能让「结算单已确认、订单还挂在待结算」的半截状态留在库里。
+            raise SettlementInvariantError(
+                "结算单 {} 的订单未能全部流转到已结算：明细 {} 笔，实际流转 {} 笔".format(
+                    settlement_pk, len(item_order_ids), len(updated_ids)
+                )
+            )
+
+        for order_id in updated_ids:
+            session.add(
+                OrderStatusLog(
+                    order_id=order_id,
+                    from_status=OrderStatus.PENDING_SETTLE,
+                    to_status=OrderStatus.SETTLED,
+                    operator_type=OperatorType.PLATFORM_FINANCE,
+                    operator_id=current.user_id,
+                    reason=CONFIRM_REASON,
+                )
+            )
+
+        # 审计日志：结算单状态变更留痕（R3 金额 / 状态变更可追溯）
+        session.add(
+            AuditLog(
+                operator_type=OperatorType.PLATFORM_FINANCE,
+                operator_id=current.user_id,
+                target_type=AUDIT_TARGET_TYPE,
+                target_id=settlement_pk,
+                provider_id=provider_id,
+                field_name="status",
+                old_value=SettlementStatus.PENDING.value,
+                new_value=SettlementStatus.CONFIRMED.value,
+                reason=CONFIRM_REASON,
+            )
+        )
+
+        await session.flush()
+
+        # 回读落库后的结算单（本事务内写的就是我们写的样子）
+        settlement = (
+            await session.execute(
+                select(Settlement).where(Settlement.id == settlement_pk)
+            )
+        ).scalar_one()
+
+    return settlement
+
+
+def _require_finance_role(current: CurrentUser) -> None:
+    """确认结算是平台财务的动作，角色不对直接拒。
+
+    失败在碰数据库之前发生，所以不会泄露任何结算单信息。
+    """
+    if current.role is not UserRole.PLATFORM_FINANCE:
+        raise SettlementForbiddenError("当前角色不能确认结算单")
 
 
 def _split_amounts(

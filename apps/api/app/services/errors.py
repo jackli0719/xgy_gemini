@@ -25,6 +25,10 @@ __all__ = [
     "ServiceFlowError",
     "ServiceFlowForbiddenError",
     "ServiceFlowInvariantError",
+    "SettlementError",
+    "SettlementForbiddenError",
+    "SettlementInvariantError",
+    "SettlementNotFoundError",
     "SlotItemMismatchError",
     "SlotNotFoundError",
     "SlotNotInFutureError",
@@ -159,4 +163,38 @@ class ServiceFlowInvariantError(ServiceFlowError):
     注意它**不是**「条件 UPDATE 没命中」的原因：
     条件 UPDATE 没命中有四种可能（不存在 / 不是我的 / 状态不对 /
     等待行锁期间被改走又改回），对调用方一律是 404。
+    """
+
+
+class SettlementError(Exception):
+    """结算确认失败的业务异常基类。
+
+    与前四棵异常树（PlaceOrderError / DispatchError / MasterActionError /
+    ServiceFlowError）平级：结算确认是独立的一条链路，
+    共用一个基类会让「下单失败」的兜底文案套到结算确认的错误上。
+    """
+
+
+class SettlementForbiddenError(SettlementError):
+    """当前账号不能确认结算单。
+
+    典型场景：角色不是 PLATFORM_FINANCE（比如拿服务商账号来确认结算）。
+    这种账号连结算单都查不到就该被挡住。
+    """
+
+
+class SettlementNotFoundError(SettlementError):
+    """结算单不存在，或已经不是「待结算」。
+
+    「不存在」与「已被确认」共用同一个异常、同一句话——
+    否则调用方能靠报错差异探测某张结算单存不存在、是什么状态。
+    """
+
+
+class SettlementInvariantError(SettlementError):
+    """内部一致性被打破（服务端 bug，不是客户端的问题）。
+
+    唯一的触发场景：结算单被确认了，但关联订单没能全部从「待结算」
+    流转到「已结算」——明细里的订单不在「待结算」状态，或明细跟订单对不上。
+    这是数据坏了，必须暴露成 500，不能伪装成「结算单不存在」。
     """

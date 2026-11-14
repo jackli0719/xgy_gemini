@@ -12,16 +12,19 @@ from app.api.v1.errors import (
     master_action_error_handler,
     place_order_error_handler,
     service_flow_error_handler,
+    settlement_error_handler,
 )
 from app.api.v1.master_action import router as master_action_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.pay import router as pay_router
+from app.api.v1.settlements import router as settlements_router
 from app.domain.slot_rule import SlotError
 from app.services.errors import (
     DispatchError,
     MasterActionError,
     PlaceOrderError,
     ServiceFlowError,
+    SettlementError,
 )
 
 __all__ = ["app"]
@@ -35,6 +38,7 @@ app.include_router(orders_router)
 app.include_router(pay_router)
 app.include_router(dispatch_router)
 app.include_router(master_action_router)
+app.include_router(settlements_router)
 
 # 异常映射：service / domain 的业务异常 -> HTTP 状态码。
 # 注册在两个基类上，子类按 MRO 自动命中（OrderNoConflictError 命中 503，
@@ -47,3 +51,5 @@ app.add_exception_handler(DispatchError, dispatch_error_handler)
 app.add_exception_handler(MasterActionError, master_action_error_handler)
 # 服务流转（开工 / 完工 / 确认完成）是第四棵异常树（ServiceFlowError）
 app.add_exception_handler(ServiceFlowError, service_flow_error_handler)
+# 结算确认是第五棵异常树（SettlementError）
+app.add_exception_handler(SettlementError, settlement_error_handler)
