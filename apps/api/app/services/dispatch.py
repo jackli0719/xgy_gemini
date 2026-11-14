@@ -17,6 +17,10 @@
 5. **order.provider_id 首次写入后不可变**：派单前为空（谁都能接），
    派单后指向承接的服务商，之后再派一律拒绝——服务商归属不是可以反复
    改写的字段。
+6. **写订单必须用条件 UPDATE，不能读-改-写**：并发派单时读-改-写会丢更新
+   （两个服务商都读到「还没派」，后提交的覆盖先提交的）。
+   把「这单还没被派走」写进 WHERE 谓词，由数据库的行锁裁决，
+   与 ``place_order._reserve_slot`` 扣库存同一套思路。
 
 状态变更必须留痕（R4）：每次真的发生状态变更，同一事务内写一条 order_status_log。
 
@@ -25,8 +29,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import NoReturn
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
@@ -85,60 +90,67 @@ async def dispatch_order(
     operator_type = _operator_type_for(current_user.role)
 
     async with session.begin():
-        order = (
-            await session.execute(select(Order).where(Order.id == order_id))
-        ).scalar_one_or_none()
-        if order is None:
-            raise OrderNotFoundError(_ORDER_NOT_FOUND_DETAIL.format(order_id=order_id))
-
-        # 归属校验放在状态校验之前。
-        #
-        # 顺序很重要：别家的订单无论处于什么状态，都只能得到 404。
-        # 如果先查状态，别家就能通过「409 vs 404」的差异反推订单存不存在、
-        # 甚至处于哪个状态。
-        if order.provider_id is not None and order.provider_id != provider_id:
-            # 与「不存在」同一个异常、同一句话
-            raise OrderNotFoundError(
-                _ORDER_NOT_FOUND_DETAIL.format(order_id=order_id)
-            )
-
-        # 状态校验：只有「待派单」能被派
-        if order.status != OrderStatus.PENDING_DISPATCH:
-            raise InvalidOrderStateError(
-                "订单当前状态不能派单：order_id={}, status={}".format(
-                    order_id, getattr(order.status, "value", order.status)
-                )
-            )
-
-        # provider_id 不可变：已经写过归属的订单不能再派。
-        # 走到这里说明 order.provider_id 要么是空的，要么等于 provider_id
-        # （别家的已被上面的归属校验挡掉）。
-        if order.provider_id is not None:
-            raise InvalidOrderStateError(
-                "订单已派单，不能重复派单：order_id={}".format(order_id)
-            )
-
         # 师傅必须存在且属于本服务商。
         # 「不存在」与「属于别家」共用同一个异常、同一句话。
+        #
+        # 这一步放在写订单之前：师傅不是本商的就没资格派单，
+        # 与订单当前是什么状态无关。
         master = (
             await session.execute(select(Master).where(Master.id == master_id))
         ).scalar_one_or_none()
         if master is None or master.provider_id != provider_id:
-            raise MasterNotFoundError(_MASTER_NOT_FOUND_DETAIL.format(master_id=master_id))
+            raise MasterNotFoundError(
+                _MASTER_NOT_FOUND_DETAIL.format(master_id=master_id)
+            )
 
-        # 状态必须经状态机流转（R4）。非法流转在这里抛 OrderTransitionError，
-        # 此时还没改过任何字段，事务回滚后订单原样不动。
-        assert_transition(order.status, OrderStatus.PENDING_ACCEPT)
+        now = datetime.now(timezone.utc)
 
-        order.provider_id = provider_id
-        order.master_id = master.id
-        order.status = OrderStatus.PENDING_ACCEPT
-        order.dispatched_at = datetime.now(timezone.utc)
+        # 条件 UPDATE：把「这单还没被派走」写进 WHERE 谓词，
+        # 由数据库的行锁保证并发下只有一个请求能改成功。
+        #
+        # 不能读-改-写。两个服务商同时派同一笔订单时，读-改-写会这样坏掉：
+        #   T1 读到 provider_id IS NULL -> T2 也读到 provider_id IS NULL
+        #   -> 两边各自改一遍 -> 后提交的那个把前一个的归属覆盖掉（丢更新）
+        # 结果是订单归属和状态流转日志对不上（两条日志、两个归属）。
+        #
+        # 条件 UPDATE 把判定交给数据库：T2 的 UPDATE 会等 T1 的行锁，
+        # 拿到锁后重新求值谓词，此时 provider_id 已经不为空，谓词不成立，
+        # 影响 0 行 —— 天然 fail-safe。
+        #
+        # 与 place_order._reserve_slot 扣库存是同一套思路。
+        result = await session.execute(
+            update(Order)
+            .where(
+                Order.id == order_id,
+                Order.status == OrderStatus.PENDING_DISPATCH,
+                # provider_id IS NULL 同时表达了「还没派过单」和
+                # 「provider_id 首次写入后不可变」
+                Order.provider_id.is_(None),
+            )
+            .values(
+                provider_id=provider_id,
+                master_id=master.id,
+                status=OrderStatus.PENDING_ACCEPT,
+                dispatched_at=now,
+                # Core 的 UPDATE 不走 ORM 的 onupdate，得自己带上
+                updated_at=func.now(),
+            )
+        )
+        if result.rowcount != 1:
+            await _raise_dispatch_conflict(
+                session, order_id=order_id, provider_id=provider_id
+            )
 
-        # 状态变更必须留痕（R4）
+        # 防御性断言：条件 UPDATE 命中，说明这一行的状态确实是 PENDING_DISPATCH，
+        # 到 PENDING_ACCEPT 的流转必然合法。状态机仍是唯一事实来源，
+        # 这里只是不让「谓词写错了」这件事静默过去。
+        assert_transition(OrderStatus.PENDING_DISPATCH, OrderStatus.PENDING_ACCEPT)
+
+        # 状态变更必须留痕（R4）。同事务：条件 UPDATE 命中才写，
+        # 命中的只有一方，所以留痕永远只有一条。
         session.add(
             OrderStatusLog(
-                order_id=order.id,
+                order_id=order_id,
                 from_status=OrderStatus.PENDING_DISPATCH,
                 to_status=OrderStatus.PENDING_ACCEPT,
                 operator_type=operator_type,
@@ -148,7 +160,53 @@ async def dispatch_order(
         )
         await session.flush()
 
+        # 回读这一行拿到落库后的订单（订单号、状态、师傅）。
+        # 同一事务内、我们自己的 UPDATE 之后读到的一定是自己写进去的值。
+        order = (
+            await session.execute(select(Order).where(Order.id == order_id))
+        ).scalar_one()
+
     return order
+
+
+async def _raise_dispatch_conflict(
+    session: AsyncSession, *, order_id: int, provider_id: int
+) -> NoReturn:
+    """条件 UPDATE 没命中时，回查那一行，区分失败原因。
+
+    回查的是同一事务内的当前状态：并发场景下另一方可能刚刚提交，
+    回查就能看到它写下的归属，于是能区分「这单已经被别家派走」（404）
+    与「这单状态不对 / 本商已经派过」（409）。
+
+    归属校验在状态校验之前：别家的订单无论处于什么状态，都只能得到 404。
+    如果先查状态，别家就能通过「409 vs 404」的差异反推订单存不存在、
+    甚至处于哪个状态。
+    """
+    row = (
+        await session.execute(
+            select(Order.provider_id, Order.status).where(Order.id == order_id)
+        )
+    ).one_or_none()
+    if row is None:
+        raise OrderNotFoundError(_ORDER_NOT_FOUND_DETAIL.format(order_id=order_id))
+
+    order_provider_id, status = row
+    if order_provider_id is not None and order_provider_id != provider_id:
+        # 与「不存在」同一个异常、同一句话
+        raise OrderNotFoundError(_ORDER_NOT_FOUND_DETAIL.format(order_id=order_id))
+
+    if order_provider_id is not None:
+        # 归属已经是本商的了：这单已经派过，不能重复派
+        raise InvalidOrderStateError(
+            "订单已派单，不能重复派单：order_id={}".format(order_id)
+        )
+
+    # 还没归属、但状态不对（例如还没支付）
+    raise InvalidOrderStateError(
+        "订单当前状态不能派单：order_id={}, status={}".format(
+            order_id, getattr(status, "value", status)
+        )
+    )
 
 
 def _operator_type_for(role: UserRole) -> OperatorType:

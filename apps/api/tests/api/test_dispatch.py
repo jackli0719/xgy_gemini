@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 from datetime import date, datetime, time, timedelta, timezone
@@ -20,11 +21,11 @@ from decimal import Decimal
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.dispatch as dispatch_module
-from app.core.auth import create_access_token
+from app.core.auth import CurrentUser, create_access_token
 from app.core.database import get_session
 from app.domain.order_state import OrderTransitionError
 from app.domain.order_state import assert_transition as real_assert_transition
@@ -778,3 +779,130 @@ async def test_invalid_transition_writes_nothing(
     assert order.provider_id is None
     assert order.master_id is None
     assert await _logs_of(db, OPEN_ORDER_ID) == []
+
+
+# =====================================================================
+# 集成测试：并发派单
+# =====================================================================
+
+
+class _Rendezvous:
+    """一次性的会合点：两个协程都到了才一起放行。
+
+    只等一个协程时最多等 10 秒就放行——测试宁可失败也不能挂死。
+    """
+
+    def __init__(self, parties: int = 2) -> None:
+        self._parties = parties
+        self._arrived = 0
+        self._released = asyncio.Event()
+
+    async def wait(self) -> None:
+        self._arrived += 1
+        if self._arrived >= self._parties:
+            self._released.set()
+        try:
+            await asyncio.wait_for(self._released.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            pass
+
+
+def _is_master_select(statement) -> bool:
+    """判断这条语句是不是「查 master 表」。
+
+    按 ORM 实体判断，不能按语句文本里有没有 "master"：
+    order 表有个 master_id 列，「SELECT order.id, order.master_id, ...」
+    的文本里同样含 "master"，按文本判断会把查订单也当成查师傅。
+    """
+    if not isinstance(statement, Select):
+        return False
+    try:
+        entity = statement.column_descriptions[0].get("entity")
+    except Exception:  # noqa: BLE001 - 认不出来就当不是
+        return False
+    return entity is Master
+
+
+class _RendezvousSession:
+    """在「第一次查 master」处会合的会话包装。
+
+    作用是把两个并发派单强制排在同一个时间窗里，好让竞态出现：
+    - 读-改-写的实现下，两个协程都会先读到「还没派」（provider_id IS NULL），
+      然后各自写一遍 -> 丢更新，两边都成功；
+    - 条件 UPDATE 的实现下，两个协程同时改，由数据库的行锁裁决，
+      只有一方能改成功。
+
+    会话的其他方法（begin / flush / add ...）原样转发给真实会话。
+    """
+
+    def __init__(self, session, rendezvous: _Rendezvous) -> None:
+        self._session = session
+        self._rendezvous = rendezvous
+        self._armed = True
+
+    async def execute(self, statement, *args, **kwargs):
+        if self._armed and _is_master_select(statement):
+            # 每个会话只拦一次：拦第二次会把自己也卡住
+            self._armed = False
+            await self._rendezvous.wait()
+        return await self._session.execute(statement, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+
+@pytest.mark.integration
+async def test_concurrent_dispatch_only_one_wins(db, seeded) -> None:
+    """两个服务商同时派同一笔订单：只有一个成功，归属只属于赢家，留痕只有一条。
+
+    条件 UPDATE 下，后到的那一方等前一方提交后重新求值谓词，
+    发现订单已经被派走，于是影响 0 行、按「不是本商的订单」处理（404）。
+    """
+    rendezvous = _Rendezvous()
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+
+    async def _dispatch(provider_id: int, user_id: int, master_id: int) -> str:
+        async with maker() as raw_session:
+            session = _RendezvousSession(raw_session, rendezvous)
+            current = CurrentUser(
+                user_id=user_id,
+                role=UserRole.PROVIDER_ADMIN,
+                provider_id=provider_id,
+            )
+            try:
+                await dispatch_order(
+                    session,
+                    order_id=OPEN_ORDER_ID,
+                    master_id=master_id,
+                    current_user=current,
+                )
+                return "ok"
+            except Exception as exc:  # noqa: BLE001 - 只取异常类型名做断言
+                return type(exc).__name__
+
+    results = await asyncio.gather(
+        _dispatch(MY_PROVIDER_ID, MY_ADMIN_USER_ID, MY_MASTER_ID),
+        _dispatch(OTHER_PROVIDER_ID, OTHER_ADMIN_USER_ID, OTHER_MASTER_ID),
+    )
+
+    # 一个成功，另一个按「订单不是自己的」被拒（404 同构）
+    assert sorted(results) == ["OrderNotFoundError", "ok"], results
+
+    winner_index = results.index("ok")
+    winner_provider = MY_PROVIDER_ID if winner_index == 0 else OTHER_PROVIDER_ID
+    winner_master = MY_MASTER_ID if winner_index == 0 else OTHER_MASTER_ID
+
+    order = await _order_of(db, OPEN_ORDER_ID)
+    # 归属只属于赢家：没有丢更新
+    assert order.provider_id == winner_provider
+    assert order.master_id == winner_master
+    assert order.status == OrderStatus.PENDING_ACCEPT
+
+    # 留痕只有一条：赢家的那次
+    logs = await _logs_of(db, OPEN_ORDER_ID)
+    assert len(logs) == 1
+    assert logs[0].from_status == OrderStatus.PENDING_DISPATCH
+    assert logs[0].to_status == OrderStatus.PENDING_ACCEPT
+    assert logs[0].operator_id == (
+        MY_ADMIN_USER_ID if winner_index == 0 else OTHER_ADMIN_USER_ID
+    )
