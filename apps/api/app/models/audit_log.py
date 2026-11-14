@@ -33,6 +33,7 @@ class AuditLog(Base, CreatedAtMixin):
         pg_enum(OperatorType, "operator_type", create_type=False),
         nullable=False,
     )
+    # 约定：operator_type=SYSTEM 时 operator_id 固定为 0（系统保留 ID），不使用 NULL
     operator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # 被审计对象的类型与主键，如 'order' / 'service_provider' / 'settlement'
     target_type: Mapped[str] = mapped_column(String(64), nullable=False)
