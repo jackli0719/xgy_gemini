@@ -8,3 +8,8 @@ asyncpg>=0.29
 alembic>=1.13
 pydantic-settings>=2.2
 python-dotenv>=1.0
+# JWT 验签：选 PyJWT 而不是 python-jose。
+# HS256 只需要标准库 hmac，PyJWT 不必拉 cryptography 轮子（python-jose 需要）；
+# 解码时显式钉住 algorithms=[...]，杜绝算法混淆；
+# 且 python-jose 有一串未修的 CVE 历史（JWT bomb 拒服务、算法混淆）。
+pyjwt>=2.8

@@ -30,12 +30,22 @@ make test-unit # 只跑单元测试
 make down      # 清理
 ```
 
+**改了依赖（`apps/api/requirements*.txt`）必须先重建测试镜像**——
+`make test` 用的 `docker compose run` 不会自动重建，镜像里没有新装的包时
+会直接报 `ModuleNotFoundError`：
+
+```bash
+docker compose --env-file .env -f infra/compose/docker-compose.dev.yml \
+  -f infra/compose/docker-compose.dev.ports.yml --profile test build api-test
+```
+
 ## 约定
 
 - **`api-test` 不对外暴露端口**，只在 compose 网络内访问 postgres（主机名是服务名 `postgres`，不是 `localhost`）。
 - **测试用独立数据库**：集成 fixture 每次会 `drop_all` + `create_all`，所以 `TEST_DATABASE_URL` 指向 `${POSTGRES_DB}_test`，绝不指向开发库 `${POSTGRES_DB}`。
 - **集成测试不许静默 skip**：容器里设了 `REQUIRE_INTEGRATION=1`，只要有集成测试被 skip（或一个都没收集到），pytest 就判失败。守卫逻辑在 `apps/api/tests/conftest.py`。
 - **插值读根目录 `.env`**：Makefile 里用 `docker compose --env-file .env`，compose 的 `${...}` 才会取到 `.env` 的真实值。不加的话会退回默认的 `oto/oto/oto`，与 `.env` 里 `DATABASE_URL` 的密码对不上。
+- **容器里读不到仓库根的 `.env`**：`app/core/config.py` 按文件路径上溯找 `.env`，容器里那个路径不存在，所以应用配置全靠环境变量注入。`api-test` 服务显式传了 `JWT_SECRET` / `JWT_ALG`（鉴权依赖 `app/core/auth.py` 验签要用），缺 `JWT_SECRET` 时 compose 直接报错，不会用空密钥把服务起起来。
 - **`POSTGRES_PORT` / `REDIS_PORT`**：宿主机映射端口可改（本机 5432 / 6379 常被别的容器占用）。只影响宿主机端口，容器内仍是 5432 / 6379。这两项在 `make up` 时生效；`make test` 不发布端口，因此用不到。
 - **`make test` 会自适应选 compose 文件**：
   - 开发栈正在跑、且它的 postgres 已经发布了宿主机端口 → 用叠加端口层的那套，配置与运行中的容器一致，

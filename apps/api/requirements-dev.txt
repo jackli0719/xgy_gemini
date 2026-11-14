@@ -4,3 +4,5 @@
 
 pytest>=8.0
 pytest-asyncio>=0.23
+# HTTP 测试客户端：httpx.AsyncClient + ASGITransport（直连 ASGI 应用，不起服务）
+httpx>=0.27

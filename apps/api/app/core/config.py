@@ -23,5 +23,10 @@ class Settings(BaseSettings):
     db_echo: bool = False
     db_pool_size: int = 10
 
+    # JWT：鉴权依赖（app.core.auth）用这组配置验签
+    jwt_secret: str
+    jwt_alg: str = "HS256"
+    jwt_access_expire_minutes: int = 120
+
 
 settings = Settings()

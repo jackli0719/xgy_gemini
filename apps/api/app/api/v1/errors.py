@@ -1,0 +1,99 @@
+"""service 异常 -> HTTP 状态码的显式映射。
+
+映射原则：
+
+- **404**：资源不存在，或资源不属于当前用户。两者共用同一个异常、同一句话
+  （见 ``services/errors.py`` 的 ``AddressNotFoundError``），
+  不让调用方靠错误差异探测他人资源是否存在。
+- **409**：状态冲突——资源被占用 / 已停用 / 库存不足 / 时段不可约。
+  这类错误重试有意义（换个时间、换个时段再来）。
+- **503**：服务端自己的问题，重试也有意义（订单号冲突重试 3 次仍冲突）。
+- **400**：兜底的业务异常，客户端改请求内容才可能解决。
+- **PricingError 不在表里**：它表示服务端数据异常（价格是脏数据），
+  不是客户端的问题，所以让它原样冒泡成 500，不翻译成 4xx。
+  把服务端数据问题报成 4xx，会让调用方以为重发请求有用。
+
+401 不在这张表里：鉴权失败由依赖直接抛 HTTPException，走 FastAPI 自带的处理。
+"""
+from __future__ import annotations
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+from app.domain.slot_rule import SlotInvalidError, SlotNotReservableError
+from app.services.errors import (
+    AddressNotFoundError,
+    ItemInactiveError,
+    ItemNotFoundError,
+    OrderNoConflictError,
+    PlaceOrderError,
+    SlotItemMismatchError,
+    SlotNotFoundError,
+    SlotNotInFutureError,
+)
+
+__all__ = [
+    "EXCEPTION_STATUS_MAP",
+    "GENERIC_DETAIL",
+    "place_order_error_handler",
+    "status_for",
+]
+
+
+# 异常类 -> HTTP 状态码。这张表是唯一的映射事实来源。
+EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
+    # 资源不存在（或不属于当前用户）
+    AddressNotFoundError: 404,
+    ItemNotFoundError: 404,
+    SlotNotFoundError: 404,
+    # 状态冲突
+    ItemInactiveError: 409,
+    SlotNotInFutureError: 409,
+    SlotItemMismatchError: 409,
+    SlotInvalidError: 409,
+    SlotNotReservableError: 409,
+    # 订单号重试上限内仍冲突：服务端问题，重试有意义
+    OrderNoConflictError: 503,
+    # 兜底：其余业务异常
+    PlaceOrderError: 400,
+}
+
+# 兜底文案。用于 PlaceOrderError 基类——它的消息可能内嵌数据库错误原文
+# （见 services/place_order.py 的完整性冲突分支），不能原样回给客户端。
+GENERIC_DETAIL = "下单失败"
+
+
+def status_for(exc: BaseException) -> int:
+    """返回异常对应的 HTTP 状态码。
+
+    按 MRO 从最具体的子类往上找，所以 ``OrderNoConflictError``
+    （``PlaceOrderError`` 的子类）命中 503，而不是兜底的 400。
+    """
+    for cls in type(exc).__mro__:
+        status_code = EXCEPTION_STATUS_MAP.get(cls)
+        if status_code is not None:
+            return status_code
+    return EXCEPTION_STATUS_MAP[PlaceOrderError]
+
+
+async def place_order_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把下单相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = _detail_for(exc)
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )
+
+
+def _detail_for(exc: BaseException) -> str:
+    """决定回给客户端的文案。
+
+    具体业务异常的消息是自己写的业务描述（不含归属信息），可以原样回；
+    ``PlaceOrderError`` 基类的消息可能带着数据库错误原文，一律换成通用文案。
+    """
+    if type(exc) is PlaceOrderError:
+        return GENERIC_DETAIL
+    return str(exc) or GENERIC_DETAIL
