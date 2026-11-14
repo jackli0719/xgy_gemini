@@ -39,6 +39,22 @@ class Settings(BaseSettings):
     jwt_alg: str = "HS256"
     jwt_access_expire_minutes: int = 120
 
+    # 超时自动确认：订单停在「待确认」超过这个小时数就由系统自动确认
+    # （见 app/services/auto_confirm.py）。0 或负数会让「立刻全部确认」，
+    # 配置阶段直接拒绝。
+    auto_confirm_threshold_hours: int = 24
+
+    @field_validator("auto_confirm_threshold_hours")
+    @classmethod
+    def _check_auto_confirm_threshold(cls, value: int) -> int:
+        """阈值必须是正整数，否则拒绝启动。"""
+        if value <= 0:
+            raise ValueError(
+                "AUTO_CONFIRM_THRESHOLD_HOURS 必须为正整数，当前 {}。".format(value)
+                + "阈值非正会让所有「待确认」订单被立刻自动确认。"
+            )
+        return value
+
     @field_validator("jwt_secret")
     @classmethod
     def _check_jwt_secret_length(cls, value: str) -> str:
