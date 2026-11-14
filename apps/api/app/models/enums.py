@@ -88,6 +88,17 @@ class OrderStatus(str, Enum):
     REFUNDED = "REFUNDED"
 
 
+class SettlementStatus(str, Enum):
+    """结算单状态。
+
+    PENDING：待结算（由 T+1 定时任务生成，等待服务商确认）。
+    CONFIRMED：已确认（服务商确认过金额，等待打款）。
+    """
+
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+
+
 class OperatorType(str, Enum):
     """订单状态流转的操作方类型。
 

@@ -13,12 +13,14 @@ from app.models.enums import (
     OrderStatus,
     PayStatus,
     ProviderStatus,
+    SettlementStatus,
     UserRole,
     UserStatus,
 )
 from app.models.order import Order, OrderStatusLog
 from app.models.provider import Master, ServiceProvider
 from app.models.schedule_slot import ScheduleSlot
+from app.models.settlement import Settlement, SettlementItem
 from app.models.user import User
 
 __all__ = [
@@ -39,6 +41,9 @@ __all__ = [
     "ServiceCategory",
     "ServiceItem",
     "ServiceProvider",
+    "Settlement",
+    "SettlementItem",
+    "SettlementStatus",
     "TimestampMixin",
     "User",
     "UserRole",
