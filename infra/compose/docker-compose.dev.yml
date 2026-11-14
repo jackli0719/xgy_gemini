@@ -1,0 +1,69 @@
+# OTO 家政服务平台 —— 本地开发用容器编排
+# 仅包含基础设施（PostgreSQL / Redis），不含 api / 前端 / nginx。
+#
+# 使用前：把根目录 .env.example 复制为 .env 并填写（POSTGRES_PASSWORD、REDIS_PASSWORD 必填）。
+# 启动：make up
+
+name: oto-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oto-postgres
+    restart: unless-stopped
+    # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB 由根目录 .env 提供
+    env_file:
+      - ../../.env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-oto}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oto}
+      POSTGRES_DB: ${POSTGRES_DB:-oto}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oto} -d ${POSTGRES_DB:-oto}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - oto-dev
+
+  redis:
+    image: redis:7-alpine
+    container_name: oto-redis
+    restart: unless-stopped
+    # REDIS_PASSWORD 由根目录 .env 提供；为空时不启用 requirepass
+    env_file:
+      - ../../.env
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - 'if [ -n "$$REDIS_PASSWORD" ]; then exec redis-server --requirepass "$$REDIS_PASSWORD"; else exec redis-server; fi'
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - oto-dev
+
+networks:
+  oto-dev:
+    name: oto-dev
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: oto-pgdata
+  redisdata:
+    name: oto-redisdata
