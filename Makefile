@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps test test-unit test-file openapi
+.PHONY: help up down logs ps test test-unit test-file openapi h5-test h5-build h5-typecheck
 
 COMPOSE_FILE := infra/compose/docker-compose.dev.yml
 COMPOSE_PORTS_FILE := infra/compose/docker-compose.dev.ports.yml
@@ -9,7 +9,7 @@ COMPOSE := docker compose --env-file .env -f $(COMPOSE_FILE)
 COMPOSE_DEV := $(COMPOSE) -f $(COMPOSE_PORTS_FILE)
 
 help: ## 显示可用目标
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-6s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-9s\033[0m %s\n", $$1, $$2}'
 
 up: ## 启动本地开发容器（postgres + redis，发布宿主机端口供直连）
 	@test -f .env || { echo "缺少 .env，请先执行 cp .env.example .env 并填写必填项"; exit 1; }
@@ -60,6 +60,17 @@ test-file: ## 只跑指定测试文件（例：make test-file FILE=tests/api/tes
 	@test -f .env || { echo "缺少 .env，请先执行 cp .env.example .env 并填写必填项"; exit 1; }
 	@test -n "$(FILE)" || { echo "缺少 FILE 参数。例：make test-file FILE=tests/api/test_orders.py"; exit 1; }
 	$(call run_tests,pytest $(FILE) $(PYTEST_ARGS))
+
+# ---- 前端：用户端 H5 ----
+# 独立工程（apps/h5-user），用 npm workspaces 里的脚本跑。
+h5-test: ## 跑用户端 H5 的前端测试（vitest）
+	npm run test --workspace @oto/h5-user
+
+h5-build: ## 构建用户端 H5（产物在 apps/h5-user/dist）
+	npm run build --workspace @oto/h5-user
+
+h5-typecheck: ## 用户端 H5 类型检查（vue-tsc）
+	npm run typecheck --workspace @oto/h5-user
 
 # 导出 OpenAPI 契约到 apps/api/openapi.json（前端据此生成类型）。
 # 在容器里跑：跟测试同一个镜像环境，导出的 schema 与测试断言的 schema
