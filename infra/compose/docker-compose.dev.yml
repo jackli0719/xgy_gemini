@@ -20,9 +20,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-oto}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oto}
       POSTGRES_DB: ${POSTGRES_DB:-oto}
-    ports:
-      # 宿主端口可改：本机 5432 常被别的 postgres 占着（改 .env 的 POSTGRES_PORT）
-      - "${POSTGRES_PORT:-5432}:5432"
+    # 宿主机端口映射不在这里，见 docker-compose.dev.ports.yml（覆盖层）。
+    # 基础层不发布端口，测试场景（api-test 走 compose 内部网络）就不需要宿主机端口，
+    # 宿主机 5432 被别的 postgres 占着时也能直接跑测试。
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -47,9 +47,7 @@ services:
       - sh
       - -c
       - 'if [ -n "$$REDIS_PASSWORD" ]; then exec redis-server --requirepass "$$REDIS_PASSWORD"; else exec redis-server; fi'
-    ports:
-      # 宿主端口可改：本机 6379 常被别的 redis 占用（改 .env 里的 REDIS_PORT）
-      - "${REDIS_PORT:-6379}:6379"
+    # 宿主机端口映射不在这里，见 docker-compose.dev.ports.yml（覆盖层）。
     volumes:
       - redisdata:/data
     healthcheck:

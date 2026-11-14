@@ -1,0 +1,24 @@
+# infra/compose —— 宿主机端口映射覆盖层
+#
+# 只给 postgres / redis 加 ports，供开发者从宿主机直连数据库。
+# 基础层 docker-compose.dev.yml 不发布任何宿主机端口：
+#
+#   make up        -> docker compose -f dev.yml -f dev.ports.yml up -d
+#                     （发布端口，开发者可直连）
+#   make test      -> docker compose -f dev.yml --profile test run --rm api-test
+#                     （不发布端口，宿主机 5432/6379 被别的容器占着也能跑）
+#
+# api-test 走 compose 内部网络，主机名用服务名 postgres / redis，不需要宿主机端口，
+# 所以测试路径不叠加这个覆盖层。
+#
+# 端口值从根目录 .env 的 POSTGRES_PORT / REDIS_PORT 读（没配则用默认值）。
+services:
+  postgres:
+    ports:
+      # 宿主端口可改：本机 5432 常被别的 postgres 占着（改 .env 的 POSTGRES_PORT）
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    ports:
+      # 宿主端口可改：本机 6379 常被别的 redis 占用（改 .env 里的 REDIS_PORT）
+      - "${REDIS_PORT:-6379}:6379"
