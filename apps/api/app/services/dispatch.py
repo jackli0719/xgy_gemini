@@ -16,7 +16,11 @@
    流转表是唯一事实来源，本模块不自己判断「能不能转」。
 5. **order.provider_id 首次写入后不可变**：派单前为空（谁都能接），
    派单后指向承接的服务商，之后再派一律拒绝——服务商归属不是可以反复
-   改写的字段。
+   改写的字段。唯一的例外是「师傅拒单后退回本商」：归属服务商不变，
+   只是清空承接师傅（master_id），订单可以重新派。
+   注意这条不变式说的是 **归属不被改写**，不是「provider_id 只能是 NULL」：
+   拒单后 provider_id 仍然是本商，master_id 已清空，两者的组合表示
+   「这单在本商的待派单池里，当前没有承接人」。
 6. **写订单必须用条件 UPDATE，不能读-改-写**：并发派单时读-改-写会丢更新
    （两个服务商都读到「还没派」，后提交的覆盖先提交的）。
    把「这单还没被派走」写进 WHERE 谓词，由数据库的行锁裁决，
@@ -31,7 +35,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import NoReturn
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
@@ -123,9 +127,18 @@ async def dispatch_order(
             .where(
                 Order.id == order_id,
                 Order.status == OrderStatus.PENDING_DISPATCH,
-                # provider_id IS NULL 同时表达了「还没派过单」和
-                # 「provider_id 首次写入后不可变」
-                Order.provider_id.is_(None),
+                # 「归属不变式」有两种形态（provider_id 都不会被改成别家）：
+                # - 还没派过单：provider_id IS NULL
+                # - 师傅拒单后退回本商：provider_id 等于当前服务商，
+                #   且 master_id 已清空（当前没有承接人，可以重新指派）。
+                #   见 app/services/master_action.py 的「拒单只清 master_id」
+                or_(
+                    Order.provider_id.is_(None),
+                    and_(
+                        Order.provider_id == provider_id,
+                        Order.master_id.is_(None),
+                    ),
+                ),
             )
             .values(
                 provider_id=provider_id,

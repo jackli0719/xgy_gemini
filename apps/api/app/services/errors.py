@@ -15,6 +15,8 @@ __all__ = [
     "InvalidOrderStateError",
     "ItemInactiveError",
     "ItemNotFoundError",
+    "MasterActionError",
+    "MasterActionForbiddenError",
     "MasterNotFoundError",
     "OrderNoConflictError",
     "OrderNotFoundError",
@@ -93,4 +95,21 @@ class DispatchForbiddenError(DispatchError):
 
     典型场景：token 里没有服务商归属（provider_id 为空），
     或者角色不是服务商侧角色。这种情况连订单都查不到就该被挡住。
+    """
+
+
+class MasterActionError(Exception):
+    """师傅接单 / 拒单失败的业务异常基类。
+
+    与 ``PlaceOrderError`` / ``DispatchError`` 平级：三条链路各有一棵异常树，
+    共用一个基类会让「下单失败」的兜底文案套到派单、接单错误上。
+    """
+
+
+class MasterActionForbiddenError(MasterActionError):
+    """当前账号不能做接单 / 拒单这件事。
+
+    典型场景：这个登录账号在 master 表里没有师傅身份；
+    或者它同时是服务商账号，但 token 里的服务商归属与师傅归属不一致。
+    这种账号连订单都查不到就该被挡住。
     """

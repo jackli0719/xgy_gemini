@@ -47,6 +47,8 @@ from app.services.errors import (
     InvalidOrderStateError,
     ItemInactiveError,
     ItemNotFoundError,
+    MasterActionError,
+    MasterActionForbiddenError,
     MasterNotFoundError,
     OrderNoConflictError,
     OrderNotFoundError,
@@ -162,8 +164,11 @@ def test_exception_status_map_contents() -> None:
         # 派单
         DispatchForbiddenError: 403,
         MasterNotFoundError: 404,
+        # 师傅接单/拒单
+        MasterActionForbiddenError: 403,
         PlaceOrderError: 400,
         DispatchError: 400,
+        MasterActionError: 400,
     }
 
 

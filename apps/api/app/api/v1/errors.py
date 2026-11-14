@@ -28,6 +28,8 @@ from app.services.errors import (
     InvalidOrderStateError,
     ItemInactiveError,
     ItemNotFoundError,
+    MasterActionError,
+    MasterActionForbiddenError,
     MasterNotFoundError,
     OrderNoConflictError,
     OrderNotFoundError,
@@ -41,7 +43,9 @@ __all__ = [
     "DISPATCH_GENERIC_DETAIL",
     "EXCEPTION_STATUS_MAP",
     "GENERIC_DETAIL",
+    "MASTER_ACTION_GENERIC_DETAIL",
     "dispatch_error_handler",
+    "master_action_error_handler",
     "place_order_error_handler",
     "status_for",
 ]
@@ -69,9 +73,12 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     # 「不存在」与「属于别家」共用同一个异常，响应也完全一样，
     # 调用方无法靠报错差异探测别家师傅（R1）
     MasterNotFoundError: 404,
+    # 师傅接单/拒单：账号没有师傅身份，或身份与服务商归属不一致
+    MasterActionForbiddenError: 403,
     # 兜底：其余业务异常
     PlaceOrderError: 400,
     DispatchError: 400,
+    MasterActionError: 400,
 }
 
 # 兜底文案。用于 PlaceOrderError 基类——它的消息可能内嵌数据库错误原文
@@ -80,6 +87,9 @@ GENERIC_DETAIL = "下单失败"
 
 # 派单的兜底文案（同理：基类的消息可能内嵌服务端内部信息）
 DISPATCH_GENERIC_DETAIL = "派单失败"
+
+# 师傅接单/拒单的兜底文案
+MASTER_ACTION_GENERIC_DETAIL = "操作失败"
 
 
 def status_for(exc: BaseException) -> int:
@@ -113,6 +123,22 @@ async def dispatch_error_handler(request: Request, exc: Exception) -> JSONRespon
     响应体统一是 ``{"detail": ...}``。
     """
     detail = DISPATCH_GENERIC_DETAIL if type(exc) is DispatchError else (str(exc) or DISPATCH_GENERIC_DETAIL)
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )
+
+
+async def master_action_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把师傅接单 / 拒单相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = (
+        MASTER_ACTION_GENERIC_DETAIL
+        if type(exc) is MasterActionError
+        else (str(exc) or MASTER_ACTION_GENERIC_DETAIL)
+    )
     return JSONResponse(
         status_code=status_for(exc),
         content={"detail": detail},
