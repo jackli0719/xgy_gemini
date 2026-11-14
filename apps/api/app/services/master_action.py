@@ -9,8 +9,11 @@
    订单用 order_no 定位（不是 order_id）：师傅手上拿到的是订单号。
 2. **条件 UPDATE，禁止读-改-写**：把「这单还派给我、还等着我响应」写进
    WHERE 谓词，由数据库的行锁裁决并发。与 dispatch、place_order 同一套思路。
-3. **失败一律 404 同构**：订单不存在、不是派给我的、状态不对，
-   三种情况抛同一个异常、同一句话。调用方没法靠报错差异探测别家的单（R1）。
+3. **失败一律 404 同构**：订单不存在、不是派给我的、状态不对、
+   以及「等待行锁期间这一行被改走又改回」，四种情况抛同一个异常、
+   同一句话。调用方没法靠报错差异探测别家的单（R1）。
+   第四种尤其要当成普通失败：那一行只是变了又变回来，
+   对调用方就是「状态变了，重试」，不是服务端 bug。
 4. **状态流转必须经状态机**（R4），并在同一事务内写 order_status_log，
    operator_type = MASTER；拒单的 reason 落进日志。
 5. **拒单只清 master_id，不动 provider_id**：订单是客户付给这个服务商的，
@@ -23,7 +26,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import NoReturn
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +35,11 @@ from app.domain.order_state import assert_transition
 from app.models.enums import OperatorType, OrderStatus
 from app.models.order import Order, OrderStatusLog
 from app.models.provider import Master
-from app.services.errors import MasterActionForbiddenError, OrderNotFoundError
+from app.services.errors import (
+    MasterActionForbiddenError,
+    MasterActionInvariantError,
+    OrderNotFoundError,
+)
 
 __all__ = ["accept_order", "reject_order"]
 
@@ -47,14 +53,6 @@ ACCEPT_REASON = "师傅接单"
 # 所以这三种失败在响应里完全一样，攻击者无法据此判断某个订单号是否真实存在、
 # 是否派给了别人（R1）。
 _ORDER_NOT_FOUND_DETAIL = "订单不存在：order_no={order_no}"
-
-
-class MasterActionInvariantError(Exception):
-    """内部一致性被打破（服务端 bug，不是客户端的问题）。
-
-    「谓词成立却没更新到行」说明条件 UPDATE 的谓词写错了，
-    这种状态必须暴露成 500，而不是伪装成 404 蒙混过去。
-    """
 
 
 async def accept_order(
@@ -94,6 +92,12 @@ async def accept_order(
         await session.flush()
 
         order = await _load_order(session, order_id)
+        # 本会话写完这一行，回读必须是我们写的样子。不一致 = 服务端 bug。
+        _assert_written_state(
+            order,
+            to_status=OrderStatus.ACCEPTED,
+            expected_master_id=master.id,
+        )
 
     return order
 
@@ -137,6 +141,12 @@ async def reject_order(
         await session.flush()
 
         order = await _load_order(session, order_id)
+        # 本会话写完这一行，回读必须是我们写的样子。不一致 = 服务端 bug。
+        _assert_written_state(
+            order,
+            to_status=OrderStatus.PENDING_DISPATCH,
+            expected_master_id=None,
+        )
 
     return order
 
@@ -209,50 +219,43 @@ async def _claim_order(
     )
     row = result.first()
     if row is None:
-        await _raise_master_action_conflict(
-            session, order_no=order_no, master_id=master_id
-        )
+        # 没命中。四种原因对调用方是同一件事——「这单现在轮不到你」：
+        #   - 订单不存在
+        #   - 不是派给我的
+        #   - 状态不对（已接单 / 已拒单 / 已派单待响应）
+        #   - 等待行锁期间这一行被改走又改回（拒单后重新派回同一师傅）
+        # 统一 404，不让调用方靠报错差异探测订单存不存在、派给了谁（R1）。
+        #
+        # 刻意**不回查**：回查的结果不会改变对外响应（都是同一条 404），
+        # 只会多一次往返。而「谓词写错了」这种真 bug 靠回查也分不出来——
+        # 改走又改回的 ABA 与写错的谓词，在回查里长得一模一样。
+        # 真 bug 的判定放在写入后的回读校验上（_assert_written_state）：
+        # 那里能确定是「我们自己写的这一行，回读却不是我们写的样子」。
+        raise OrderNotFoundError(_ORDER_NOT_FOUND_DETAIL.format(order_no=order_no))
 
     order_id = row[0]
     return order_id
 
 
-async def _raise_master_action_conflict(
-    session: AsyncSession, *, order_no: str, master_id: int
-) -> NoReturn:
-    """条件 UPDATE 没命中时，回查那一行。
+def _assert_written_state(
+    order: Order, *, to_status: OrderStatus, expected_master_id: int | None
+) -> None:
+    """校验「本会话刚写的这一行，回读出来确实是我们写的样子」。
 
-    回查的是同一事务内的当前状态：并发场景下另一方可能刚刚提交，
-    回查就能看到它写下的新状态，于是能区分「这单已经被别人接走」
-    与「这单本来就不是派给我的」。
+    条件 UPDATE 命中后，同一事务内回读一定是我们自己写进去的值。
+    回读出来不一样，说明这一行的写入被别的东西改了（数据库触发器、
+    谓词写歪、库里规则与模型不一致）——这是服务端 bug，不是业务失败，
+    必须暴露成 500，不能伪装成「订单不存在」蒙混过去。
 
-    两种情况对外都是同一条 404 消息——回查分不出可对外展示的差异，
-    它真正的用处是最后那道断言：谓词成立却没更新到行，
-    说明谓词写错了（而不是数据脏了），这必须暴露成服务端错误，
-    不能伪装成「订单不存在」蒙混过去。
+    这是 MasterActionInvariantError 唯一的用途：
+    「本事务内本会话改过该行，回读仍不一致」。
     """
-    detail = _ORDER_NOT_FOUND_DETAIL.format(order_no=order_no)
-
-    row = (
-        await session.execute(
-            select(Order.master_id, Order.status).where(Order.order_no == order_no)
-        )
-    ).one_or_none()
-    if row is None:
-        # 订单不存在
-        raise OrderNotFoundError(detail)
-
-    order_master_id, status = row
-    if order_master_id == master_id and status == OrderStatus.PENDING_ACCEPT:
-        # 不可达：谓词明明成立，却一行都没改到 —— 谓词写错了
+    if order.status != to_status or order.master_id != expected_master_id:
         raise MasterActionInvariantError(
-            "条件更新没有命中，但订单仍处于派给我且待接单的状态：order_no={}".format(
-                order_no
+            "订单状态与本次写入不一致：order_no={}, status={}".format(
+                order.order_no, getattr(order.status, "value", order.status)
             )
         )
-
-    # 不是派给我的，或者状态不对（已接单 / 已拒单 / 已派单待响应）
-    raise OrderNotFoundError(detail)
 
 
 def _add_status_log(

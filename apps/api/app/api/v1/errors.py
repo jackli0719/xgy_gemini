@@ -30,6 +30,7 @@ from app.services.errors import (
     ItemNotFoundError,
     MasterActionError,
     MasterActionForbiddenError,
+    MasterActionInvariantError,
     MasterNotFoundError,
     OrderNoConflictError,
     OrderNotFoundError,
@@ -75,6 +76,8 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     MasterNotFoundError: 404,
     # 师傅接单/拒单：账号没有师傅身份，或身份与服务商归属不一致
     MasterActionForbiddenError: 403,
+    # 师傅接单/拒单：内部一致性被打破（服务端 bug，不是客户端的问题）
+    MasterActionInvariantError: 500,
     # 兜底：其余业务异常
     PlaceOrderError: 400,
     DispatchError: 400,

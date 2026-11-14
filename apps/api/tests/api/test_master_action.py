@@ -21,10 +21,11 @@ from decimal import Decimal
 
 import httpx
 import pytest
-from sqlalchemy import Select, select
+from sqlalchemy import Select, Update, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.master_action as master_action_module
+from app.api.v1.errors import status_for
 from app.core.auth import CurrentUser, create_access_token
 from app.core.database import get_session
 from app.domain.order_state import OrderTransitionError
@@ -45,6 +46,9 @@ from app.models.provider import Master, ServiceProvider
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
 from app.schemas.master_action import AcceptResult, RejectRequest, RejectResult
+from app.services.dispatch import dispatch_order
+from app.services.errors import MasterActionInvariantError, OrderNotFoundError
+from app.services.master_action import _assert_written_state
 from app.services.master_action import accept_order, reject_order
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -182,6 +186,46 @@ def test_result_field_sets() -> None:
 def test_accept_reason_constant() -> None:
     """接单留痕用的原因常量固定。"""
     assert master_action_module.ACCEPT_REASON == "师傅接单"
+
+
+def test_assert_written_state_passes_when_row_matches() -> None:
+    """回读与自己写的一致 -> 不抛。"""
+    order = Order(
+        id=1,
+        order_no=MY_ORDER_NO,
+        status=OrderStatus.ACCEPTED,
+        master_id=MY_MASTER_ID,
+    )
+    _assert_written_state(
+        order,
+        to_status=OrderStatus.ACCEPTED,
+        expected_master_id=MY_MASTER_ID,
+    )
+
+
+def test_assert_written_state_raises_on_inconsistent_row() -> None:
+    """本会话写过的行，回读却不是自己写的样子 -> MasterActionInvariantError。
+
+    这是服务端 bug（触发器改了值 / 谓词写歪），必须暴露成 500，
+    不能伪装成「订单不存在」。
+    """
+    order = Order(
+        id=1,
+        order_no=MY_ORDER_NO,
+        status=OrderStatus.ACCEPTED,
+        master_id=MY_MASTER_ID,
+    )
+    with pytest.raises(MasterActionInvariantError):
+        _assert_written_state(
+            order,
+            to_status=OrderStatus.PENDING_DISPATCH,
+            expected_master_id=None,
+        )
+
+
+def test_invariant_error_is_mapped_to_500() -> None:
+    """内部一致性错误映射成 500（不是 4xx）。"""
+    assert status_for(MasterActionInvariantError("坏了")) == 500
 
 
 def test_operator_type_is_master() -> None:
@@ -858,6 +902,145 @@ async def test_concurrent_reject_only_one_wins(db, seeded) -> None:
     assert order.status == OrderStatus.PENDING_DISPATCH
     assert order.master_id is None
     assert len(await _logs_of(db, MY_ORDER_ID)) == 1
+
+
+# ---------------------------------------------------------------------
+# 并发下的 ABA：这一行被改走又改回
+# ---------------------------------------------------------------------
+
+
+def _is_order_update(statement) -> bool:
+    """判断这条语句是不是「对 order 表的 UPDATE」。"""
+    if not isinstance(statement, Update):
+        return False
+    table = getattr(statement, "table", None)
+    return table is not None and getattr(table, "name", None) == "order"
+
+
+class _PausedOrderUpdateSession:
+    """在「对 order 表的第一条 UPDATE」前后卡住，用来撑开一个并发窗口。
+
+    - ``issued``：UPDATE 发出前打点（测试据此知道 T2 已经在动这一行）
+    - ``done``：UPDATE 返回后打点
+    - ``resume``：测试放行 T2 继续往下走
+
+    窗口的作用：让另一个事务能在「T2 的 UPDATE 没命中」与「T2 接下来的处理」
+    之间改掉这一行——正是 ABA 能发生的地方。
+    """
+
+    def __init__(
+        self,
+        session,
+        *,
+        issued: asyncio.Event,
+        done: asyncio.Event,
+        resume: asyncio.Event,
+    ) -> None:
+        self._session = session
+        self._issued = issued
+        self._done = done
+        self._resume = resume
+        self._armed = True
+
+    async def execute(self, statement, *args, **kwargs):
+        if self._armed and _is_order_update(statement):
+            self._armed = False
+            self._issued.set()
+            result = await self._session.execute(statement, *args, **kwargs)
+            self._done.set()
+            # 最多等 10 秒：测试宁可失败也不能挂死
+            await asyncio.wait_for(self._resume.wait(), timeout=10)
+            return result
+        return await self._session.execute(statement, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+
+@pytest.mark.integration
+async def test_concurrent_redispatch_returns_404_not_500(db, seeded) -> None:
+    """等待行锁期间这一行被改走又改回 -> 404，不是 500。
+
+    ABA 场景（ABA = 改走又改回）：
+      V0 = (PENDING_ACCEPT, 我的师傅)
+      T1 拒单，握着行锁不提交              -> 这一行将被改成 V1
+      T2 接单：谓词命中 V0，但被 T1 的行锁挡住，等着
+      T1 提交                            -> V1 = (PENDING_DISPATCH, 无师傅)
+      T2 的 UPDATE 重新求值谓词，V1 不满足  -> 改 0 行
+      T3 把订单重新派回同一师傅            -> V2 = (PENDING_ACCEPT, 我的师傅)
+      T2 接下来处理这一行时看到的正是 V2 —— 与它的谓词目标一模一样
+
+    旧实现在这里以为「谓词明明成立却一行都没改到 = 谓词写错了」，
+    抛 MasterActionInvariantError -> 500。但这不是 bug：
+    这一行只是在我们等待期间被改走又改回，对调用方就是「状态变了，重试」，
+    应与其他失败同构 404。
+    """
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    issued = asyncio.Event()
+    done = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def _t2_accept() -> str:
+        async with maker() as raw_session:
+            session = _PausedOrderUpdateSession(
+                raw_session, issued=issued, done=done, resume=resume
+            )
+            current = CurrentUser(
+                user_id=MY_MASTER_USER_ID,
+                role=UserRole.MASTER,
+                provider_id=None,
+            )
+            try:
+                await accept_order(session, order_no=MY_ORDER_NO, current_user=current)
+                return "ok"
+            except Exception as exc:  # noqa: BLE001 - 只取异常类型名做断言
+                return type(exc).__name__
+
+    async with maker() as t1_session:
+        # T1：拒单，但握着这一行的行锁不提交
+        await t1_session.execute(
+            update(Order)
+            .where(Order.id == MY_ORDER_ID)
+            .values(
+                status=OrderStatus.PENDING_DISPATCH,
+                master_id=None,
+                updated_at=func.now(),
+            )
+        )
+
+        task = asyncio.create_task(_t2_accept())
+        # T2 的 UPDATE 已经发出（可能正等行锁）
+        await asyncio.wait_for(issued.wait(), timeout=10)
+        # T1 提交：这一行变成 (PENDING_DISPATCH, 无师傅)
+        await t1_session.commit()
+        # T2 的 UPDATE 返回了：没命中
+        await asyncio.wait_for(done.wait(), timeout=10)
+
+        # T3：把订单重新派回同一师傅 -> (PENDING_ACCEPT, 我的师傅)
+        async with maker() as t3_session:
+            await dispatch_order(
+                t3_session,
+                order_id=MY_ORDER_ID,
+                master_id=MY_MASTER_ID,
+                current_user=CurrentUser(
+                    user_id=MY_ADMIN_USER_ID,
+                    role=UserRole.PROVIDER_ADMIN,
+                    provider_id=MY_PROVIDER_ID,
+                ),
+            )
+
+        # 放行 T2
+        resume.set()
+        result = await asyncio.wait_for(task, timeout=10)
+
+    # 404 同构，不是 500
+    assert result == "OrderNotFoundError", result
+    assert status_for(OrderNotFoundError("x")) == 404
+
+    # 订单最终停在 T3 派回的状态，T2 没能改它
+    order = await _order_of(db, MY_ORDER_ID)
+    assert order.status == OrderStatus.PENDING_ACCEPT
+    assert order.master_id == MY_MASTER_ID
 
 
 # ---------------------------------------------------------------------

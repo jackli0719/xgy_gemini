@@ -17,6 +17,7 @@ __all__ = [
     "ItemNotFoundError",
     "MasterActionError",
     "MasterActionForbiddenError",
+    "MasterActionInvariantError",
     "MasterNotFoundError",
     "OrderNoConflictError",
     "OrderNotFoundError",
@@ -112,4 +113,17 @@ class MasterActionForbiddenError(MasterActionError):
     典型场景：这个登录账号在 master 表里没有师傅身份；
     或者它同时是服务商账号，但 token 里的服务商归属与师傅归属不一致。
     这种账号连订单都查不到就该被挡住。
+    """
+
+
+class MasterActionInvariantError(MasterActionError):
+    """内部一致性被打破（服务端 bug，不是客户端的问题）。
+
+    唯一的触发场景：「本事务内本会话改过该行，回读出来仍不是我们写的样子」。
+
+    注意它**不是**「条件 UPDATE 没命中」的原因：
+    条件 UPDATE 没命中有四种可能（不存在 / 不是派给我的 / 状态不对 /
+    等待行锁期间被改走又改回），对调用方一律是 404。
+    其中「改走又改回」（ABA）在回查里与「谓词写错」长得一样，
+    分不出来也不该分——它就是一次普通的状态变化，客户端重试即可。
     """
