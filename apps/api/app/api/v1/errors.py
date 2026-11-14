@@ -23,9 +23,12 @@ from fastapi.responses import JSONResponse
 from app.domain.slot_rule import SlotInvalidError, SlotNotReservableError
 from app.services.errors import (
     AddressNotFoundError,
+    DispatchError,
+    DispatchForbiddenError,
     InvalidOrderStateError,
     ItemInactiveError,
     ItemNotFoundError,
+    MasterNotFoundError,
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
@@ -35,8 +38,10 @@ from app.services.errors import (
 )
 
 __all__ = [
+    "DISPATCH_GENERIC_DETAIL",
     "EXCEPTION_STATUS_MAP",
     "GENERIC_DETAIL",
+    "dispatch_error_handler",
     "place_order_error_handler",
     "status_for",
 ]
@@ -58,13 +63,23 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     InvalidOrderStateError: 409,
     # 订单号重试上限内仍冲突：服务端问题，重试有意义
     OrderNoConflictError: 503,
+    # 派单：没有服务商归属 / 角色不对
+    DispatchForbiddenError: 403,
+    # 派单：师傅不存在，或不属于当前服务商
+    # 「不存在」与「属于别家」共用同一个异常，响应也完全一样，
+    # 调用方无法靠报错差异探测别家师傅（R1）
+    MasterNotFoundError: 404,
     # 兜底：其余业务异常
     PlaceOrderError: 400,
+    DispatchError: 400,
 }
 
 # 兜底文案。用于 PlaceOrderError 基类——它的消息可能内嵌数据库错误原文
 # （见 services/place_order.py 的完整性冲突分支），不能原样回给客户端。
 GENERIC_DETAIL = "下单失败"
+
+# 派单的兜底文案（同理：基类的消息可能内嵌服务端内部信息）
+DISPATCH_GENERIC_DETAIL = "派单失败"
 
 
 def status_for(exc: BaseException) -> int:
@@ -86,6 +101,18 @@ async def place_order_error_handler(request: Request, exc: Exception) -> JSONRes
     响应体统一是 ``{"detail": ...}``。
     """
     detail = _detail_for(exc)
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )
+
+
+async def dispatch_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把派单相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = DISPATCH_GENERIC_DETAIL if type(exc) is DispatchError else (str(exc) or DISPATCH_GENERIC_DETAIL)
     return JSONResponse(
         status_code=status_for(exc),
         content={"detail": detail},

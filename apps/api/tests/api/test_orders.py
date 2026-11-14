@@ -42,9 +42,12 @@ from app.models.user import User
 from app.schemas.order import PlaceOrderRequest
 from app.services.errors import (
     AddressNotFoundError,
+    DispatchError,
+    DispatchForbiddenError,
     InvalidOrderStateError,
     ItemInactiveError,
     ItemNotFoundError,
+    MasterNotFoundError,
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
@@ -156,7 +159,11 @@ def test_exception_status_map_contents() -> None:
         SlotNotReservableError: 409,
         InvalidOrderStateError: 409,
         OrderNoConflictError: 503,
+        # 派单
+        DispatchForbiddenError: 403,
+        MasterNotFoundError: 404,
         PlaceOrderError: 400,
+        DispatchError: 400,
     }
 
 
