@@ -1,8 +1,10 @@
 # OTO 家政服务平台 —— 本地开发用容器编排
-# 仅包含基础设施（PostgreSQL / Redis），不含 api / 前端 / nginx。
+# 基础设施（PostgreSQL / Redis）+ 测试容器（api-test，profile=test）。
+# 不含 api / 前端 / nginx 运行时。
 #
 # 使用前：把根目录 .env.example 复制为 .env 并填写（POSTGRES_PASSWORD、REDIS_PASSWORD 必填）。
-# 启动：make up
+# 启动：make up          —— 只起基础设施，不会拉起 api-test
+# 测试：make test         —— 在 api-test 容器里跑全部测试（单元 + 集成）
 
 name: oto-dev
 
@@ -19,7 +21,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oto}
       POSTGRES_DB: ${POSTGRES_DB:-oto}
     ports:
-      - "5432:5432"
+      # 宿主端口可改：本机 5432 常被别的 postgres 占着（改 .env 的 POSTGRES_PORT）
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +48,8 @@ services:
       - -c
       - 'if [ -n "$$REDIS_PASSWORD" ]; then exec redis-server --requirepass "$$REDIS_PASSWORD"; else exec redis-server; fi'
     ports:
-      - "6379:6379"
+      # 宿主端口可改：本机 6379 常被别的 redis 占用（改 .env 里的 REDIS_PORT）
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -54,6 +58,36 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    networks:
+      - oto-dev
+
+# 测试容器：只跑 pytest，不对外暴露端口。
+  # profile=test —— `make up` 不拉起它，只有 `make test` / `make test-unit` 会用。
+  api-test:
+    build:
+      # 上下文是仓库根：Dockerfile 里要 COPY apps/api/...
+      context: ../..
+      dockerfile: apps/api/Dockerfile.test
+    image: oto-api-test:latest
+    profiles: ["test"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 容器内走 compose 网络，主机名是服务名，不是 localhost
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-oto}:${POSTGRES_PASSWORD:-oto}@postgres:5432/${POSTGRES_DB:-oto}
+      # 集成测试必须用独立库：集成 fixture 每次会 drop_all + create_all，
+      # 指到开发库上会把开发数据清空
+      TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-oto}:${POSTGRES_PASSWORD:-oto}@postgres:5432/${POSTGRES_DB:-oto}_test
+      # 守卫开关：集成测试不许静默 skip（见 apps/api/tests/conftest.py）
+      REQUIRE_INTEGRATION: "1"
+      # 集成测试数量下限，少于这个数说明测试没被收集到，直接判失败
+      EXPECTED_INTEGRATION_TESTS: "6"
+    volumes:
+      # 挂载源码：改代码后重跑不必重建镜像
+      - ../../apps/api:/app/apps/api
     networks:
       - oto-dev
 

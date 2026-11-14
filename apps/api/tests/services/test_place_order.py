@@ -580,6 +580,7 @@ def _maker(db, class_=AsyncSession) -> async_sessionmaker:
     return async_sessionmaker(db, class_=class_, expire_on_commit=False)
 
 
+@pytest.mark.integration
 async def test_integration_place_order_success(db, seeded) -> None:
     """正常下单：扣库存 + 落订单 + 写状态日志。"""
     maker = _maker(db)
@@ -618,6 +619,7 @@ async def test_integration_place_order_success(db, seeded) -> None:
         assert used == 1
 
 
+@pytest.mark.integration
 async def test_integration_slot_not_reservable_leaves_no_order(db, seeded) -> None:
     """库存不足：条件 UPDATE 影响 0 行 -> SlotNotReservableError，无残行。"""
     maker = _maker(db)
@@ -659,6 +661,7 @@ class _FailingFlushSession(AsyncSession):
         raise RuntimeError("模拟订单 insert 失败")
 
 
+@pytest.mark.integration
 async def test_integration_rolls_back_stock_on_insert_failure(db, seeded) -> None:
     """订单写入失败：库存扣减也回滚，used 恢复原值。"""
     maker = _maker(db, class_=_FailingFlushSession)
@@ -686,6 +689,7 @@ async def test_integration_rolls_back_stock_on_insert_failure(db, seeded) -> Non
         assert count == 0
 
 
+@pytest.mark.integration
 async def test_integration_retries_on_order_no_conflict(db, seeded, monkeypatch) -> None:
     """注入重复 order_no：首轮冲突 -> 重试换号 -> 成功。"""
     maker = _maker(db)
@@ -719,6 +723,7 @@ async def test_integration_retries_on_order_no_conflict(db, seeded, monkeypatch)
         assert order.order_no == "OTO20990101000002"
 
 
+@pytest.mark.integration
 async def test_integration_raises_when_order_no_always_conflicts(
     db, seeded, monkeypatch
 ) -> None:
@@ -761,6 +766,7 @@ async def test_integration_raises_when_order_no_always_conflicts(
         assert used == 0  # 每轮都回滚了
 
 
+@pytest.mark.integration
 async def test_integration_concurrent_orders_do_not_oversell(db, seeded) -> None:
     """并发下单不超卖：N 个并发抢 capacity 个名额，成功数恰好等于 capacity。"""
     concurrency = 10

@@ -1,0 +1,41 @@
+# Docker 构建上下文排除项
+# 作用：避免把密钥、版本库和构建产物送进构建上下文（镜像里只需要被 COPY 的源码）
+
+# 密钥与本地环境
+.env
+.env.*
+!.env.example
+
+# 版本库
+.git
+.gitignore
+
+# 依赖与构建产物
+node_modules
+**/node_modules
+dist
+build
+**/dist
+**/build
+*.tgz
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/*.egg-info
+**/.venv
+**/venv
+
+# 本地数据与日志
+logs
+**/logs
+*.log
+*.sqlite3
+
+# 编辑器
+.idea
+.vscode
+.DS_Store

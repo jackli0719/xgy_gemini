@@ -1,0 +1,27 @@
+# 测试镜像：只用来跑 pytest，不含生产运行时配置。
+#
+# 构建上下文是仓库根（见 infra/compose/docker-compose.dev.yml 的 api-test 服务）：
+#   docker build -f apps/api/Dockerfile.test .
+#
+# 目录布局说明：应用放在 /app/apps/api 而不是 /app。
+# app/core/config.py 用 `Path(__file__).resolve().parents[4]` 上溯到仓库根去读 .env，
+# 应用必须位于文件系统根之下第 4 层以上，否则 parents[4] 会 IndexError。
+FROM python:3.11-slim
+
+WORKDIR /app/apps/api
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# 依赖层：先只拷 requirements，改业务代码不会让这一层失效
+COPY apps/api/requirements.txt apps/api/requirements-dev.txt ./
+# 全部依赖在 PyPI 上都有 manylinux wheel（cp311 / x86_64 / aarch64），
+# 因此不需要额外装 gcc / libpq-dev 之类的编译依赖
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+
+# 代码层
+COPY apps/api/ ./
+
+CMD ["pytest"]
