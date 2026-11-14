@@ -54,6 +54,9 @@ from app.services.errors import (
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
+    ServiceFlowError,
+    ServiceFlowForbiddenError,
+    ServiceFlowInvariantError,
     SlotItemMismatchError,
     SlotNotFoundError,
     SlotNotInFutureError,
@@ -168,9 +171,13 @@ def test_exception_status_map_contents() -> None:
         # 师傅接单/拒单
         MasterActionForbiddenError: 403,
         MasterActionInvariantError: 500,
+        # 服务流转（开工 / 完工 / 确认完成）
+        ServiceFlowForbiddenError: 403,
+        ServiceFlowInvariantError: 500,
         PlaceOrderError: 400,
         DispatchError: 400,
         MasterActionError: 400,
+        ServiceFlowError: 400,
     }
 
 

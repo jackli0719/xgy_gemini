@@ -22,6 +22,9 @@ __all__ = [
     "OrderNoConflictError",
     "OrderNotFoundError",
     "PlaceOrderError",
+    "ServiceFlowError",
+    "ServiceFlowForbiddenError",
+    "ServiceFlowInvariantError",
     "SlotItemMismatchError",
     "SlotNotFoundError",
     "SlotNotInFutureError",
@@ -126,4 +129,34 @@ class MasterActionInvariantError(MasterActionError):
     等待行锁期间被改走又改回），对调用方一律是 404。
     其中「改走又改回」（ABA）在回查里与「谓词写错」长得一样，
     分不出来也不该分——它就是一次普通的状态变化，客户端重试即可。
+    """
+
+
+class ServiceFlowError(Exception):
+    """服务流转（开工 / 完工 / 确认完成）失败的业务异常基类。
+
+    与前三棵异常树（PlaceOrderError / DispatchError / MasterActionError）平级：
+    四条链路各有一棵树，共用一个基类会让「下单失败」的兜底文案
+    套到派单、接单、服务流转的错误上。
+    """
+
+
+class ServiceFlowForbiddenError(ServiceFlowError):
+    """当前账号不能做这件事。
+
+    典型场景：角色不对（用普通用户账号去开工）；
+    或者账号在 master 表里没有师傅身份；
+    或者它同时是服务商账号，但 token 里的服务商归属与师傅归属不一致。
+    这种账号连订单都碰不到就该被挡住。
+    """
+
+
+class ServiceFlowInvariantError(ServiceFlowError):
+    """内部一致性被打破（服务端 bug，不是客户端的问题）。
+
+    唯一的触发场景：「本事务内本会话改过该行，回读出来仍不是我们写的样子」。
+
+    注意它**不是**「条件 UPDATE 没命中」的原因：
+    条件 UPDATE 没命中有四种可能（不存在 / 不是我的 / 状态不对 /
+    等待行锁期间被改走又改回），对调用方一律是 404。
     """

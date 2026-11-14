@@ -35,6 +35,9 @@ from app.services.errors import (
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
+    ServiceFlowError,
+    ServiceFlowForbiddenError,
+    ServiceFlowInvariantError,
     SlotItemMismatchError,
     SlotNotFoundError,
     SlotNotInFutureError,
@@ -45,9 +48,11 @@ __all__ = [
     "EXCEPTION_STATUS_MAP",
     "GENERIC_DETAIL",
     "MASTER_ACTION_GENERIC_DETAIL",
+    "SERVICE_FLOW_GENERIC_DETAIL",
     "dispatch_error_handler",
     "master_action_error_handler",
     "place_order_error_handler",
+    "service_flow_error_handler",
     "status_for",
 ]
 
@@ -78,10 +83,15 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     MasterActionForbiddenError: 403,
     # 师傅接单/拒单：内部一致性被打破（服务端 bug，不是客户端的问题）
     MasterActionInvariantError: 500,
+    # 服务流转：角色不对 / 没有师傅身份 / 身份与服务商归属不一致
+    ServiceFlowForbiddenError: 403,
+    # 服务流转：内部一致性被打破（服务端 bug，不是客户端的问题）
+    ServiceFlowInvariantError: 500,
     # 兜底：其余业务异常
     PlaceOrderError: 400,
     DispatchError: 400,
     MasterActionError: 400,
+    ServiceFlowError: 400,
 }
 
 # 兜底文案。用于 PlaceOrderError 基类——它的消息可能内嵌数据库错误原文
@@ -93,6 +103,9 @@ DISPATCH_GENERIC_DETAIL = "派单失败"
 
 # 师傅接单/拒单的兜底文案
 MASTER_ACTION_GENERIC_DETAIL = "操作失败"
+
+# 服务流转（开工 / 完工 / 确认完成）的兜底文案
+SERVICE_FLOW_GENERIC_DETAIL = "操作失败"
 
 
 def status_for(exc: BaseException) -> int:
@@ -141,6 +154,22 @@ async def master_action_error_handler(request: Request, exc: Exception) -> JSONR
         MASTER_ACTION_GENERIC_DETAIL
         if type(exc) is MasterActionError
         else (str(exc) or MASTER_ACTION_GENERIC_DETAIL)
+    )
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )
+
+
+async def service_flow_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把服务流转相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = (
+        SERVICE_FLOW_GENERIC_DETAIL
+        if type(exc) is ServiceFlowError
+        else (str(exc) or SERVICE_FLOW_GENERIC_DETAIL)
     )
     return JSONResponse(
         status_code=status_for(exc),

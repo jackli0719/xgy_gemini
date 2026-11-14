@@ -21,7 +21,7 @@ from decimal import Decimal
 
 import httpx
 import pytest
-from sqlalchemy import Select, Update, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.master_action as master_action_module
@@ -50,6 +50,7 @@ from app.services.dispatch import dispatch_order
 from app.services.errors import MasterActionInvariantError, OrderNotFoundError
 from app.services.master_action import _assert_written_state
 from app.services.master_action import accept_order, reject_order
+from support import Rendezvous, RendezvousSession, is_order_update
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -762,75 +763,6 @@ async def test_reject_requires_reason(api_client, seeded, db) -> None:
 # ---------------------------------------------------------------------
 
 
-class _Rendezvous:
-    """一次性的会合点：两个协程都到了才一起放行。
-
-    只等一个协程时最多等 10 秒就放行——测试宁可失败也不能挂死。
-    """
-
-    def __init__(self, parties: int = 2) -> None:
-        self._parties = parties
-        self._arrived = 0
-        self._released = asyncio.Event()
-
-    async def wait(self) -> None:
-        self._arrived += 1
-        if self._arrived >= self._parties:
-            self._released.set()
-        try:
-            await asyncio.wait_for(self._released.wait(), timeout=10)
-        except asyncio.TimeoutError:
-            pass
-
-
-def _touches_order(statement) -> bool:
-    """判断这条语句是不是作用在 order 表上（SELECT 或 UPDATE）。
-
-    会合点必须落在「实现第一次碰到 order 表」的位置，而不是某个具体语句：
-    - 读-改-写的实现里，第一句碰到 order 表的是 SELECT；
-    - 条件 UPDATE 的实现里，第一句碰到 order 表的是 UPDATE。
-    落在固定语句上，只能强制其中一种实现交错 —— 另一种实现会被放过，
-    变异测试就会假绿（这坑上一张卡踩过）。
-
-    SELECT 按 ORM 实体判断，不能按语句文本里有没有 "order"：
-    order 表有个 master_id 列，按文本判断会把查 master 也算进来。
-    UPDATE 没有 column_descriptions，改看它作用的表。
-    """
-    if isinstance(statement, Select):
-        try:
-            return statement.column_descriptions[0].get("entity") is Order
-        except Exception:  # noqa: BLE001 - 认不出来就当不是
-            return False
-    table = getattr(statement, "table", None)
-    return table is not None and getattr(table, "name", None) == "order"
-
-
-class _RendezvousSession:
-    """在「第一次碰到 order 表」处会合的会话包装。
-
-    作用是把两个并发接单强制排在同一个时间窗里，好让竞态出现：
-    - 读-改-写的实现下，两个协程都会先读到「还等着我接单」，
-      然后各自改一遍 -> 丢更新，两边都成功、写出两条日志；
-    - 条件 UPDATE 的实现下，两个协程同时改，由数据库的行锁裁决，
-      只有一方能改成功。
-    """
-
-    def __init__(self, session, rendezvous: _Rendezvous) -> None:
-        self._session = session
-        self._rendezvous = rendezvous
-        self._armed = True
-
-    async def execute(self, statement, *args, **kwargs):
-        if self._armed and _touches_order(statement):
-            # 每个会话只拦一次：拦第二次会把自己也卡住
-            self._armed = False
-            await self._rendezvous.wait()
-        return await self._session.execute(statement, *args, **kwargs)
-
-    def __getattr__(self, name):
-        return getattr(self._session, name)
-
-
 @pytest.mark.integration
 async def test_concurrent_accept_only_one_wins(db, seeded) -> None:
     """同一个师傅同时接同一笔订单：只有一个成功，留痕只有一条。
@@ -838,12 +770,12 @@ async def test_concurrent_accept_only_one_wins(db, seeded) -> None:
     条件 UPDATE 下，后到的那一方等前一方提交后重新求值谓词，
     发现订单已经不是「待接单」，于是影响 0 行、按「订单不存在」处理（404）。
     """
-    rendezvous = _Rendezvous()
+    rendezvous = Rendezvous()
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
 
     async def _accept() -> str:
         async with maker() as raw_session:
-            session = _RendezvousSession(raw_session, rendezvous)
+            session = RendezvousSession(raw_session, rendezvous)
             current = CurrentUser(
                 user_id=MY_MASTER_USER_ID,
                 role=UserRole.MASTER,
@@ -872,12 +804,12 @@ async def test_concurrent_accept_only_one_wins(db, seeded) -> None:
 @pytest.mark.integration
 async def test_concurrent_reject_only_one_wins(db, seeded) -> None:
     """同一个师傅同时拒同一笔订单：只有一个成功，留痕只有一条。"""
-    rendezvous = _Rendezvous()
+    rendezvous = Rendezvous()
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
 
     async def _reject() -> str:
         async with maker() as raw_session:
-            session = _RendezvousSession(raw_session, rendezvous)
+            session = RendezvousSession(raw_session, rendezvous)
             current = CurrentUser(
                 user_id=MY_MASTER_USER_ID,
                 role=UserRole.MASTER,
@@ -909,14 +841,6 @@ async def test_concurrent_reject_only_one_wins(db, seeded) -> None:
 # ---------------------------------------------------------------------
 
 
-def _is_order_update(statement) -> bool:
-    """判断这条语句是不是「对 order 表的 UPDATE」。"""
-    if not isinstance(statement, Update):
-        return False
-    table = getattr(statement, "table", None)
-    return table is not None and getattr(table, "name", None) == "order"
-
-
 class _PausedOrderUpdateSession:
     """在「对 order 表的第一条 UPDATE」前后卡住，用来撑开一个并发窗口。
 
@@ -943,7 +867,7 @@ class _PausedOrderUpdateSession:
         self._armed = True
 
     async def execute(self, statement, *args, **kwargs):
-        if self._armed and _is_order_update(statement):
+        if self._armed and is_order_update(statement):
             self._armed = False
             self._issued.set()
             result = await self._session.execute(statement, *args, **kwargs)
