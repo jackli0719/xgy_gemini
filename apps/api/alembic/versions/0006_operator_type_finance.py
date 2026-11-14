@@ -18,8 +18,18 @@ operator_type 区分是谁改的钱，「平台管理员」和「平台财务」
 
 注意事项：
 
-- ``ADD VALUE`` 不能在同一个事务里使用新值，但**可以**在事务里执行
-  （PG 12 起放宽了限制）。本迁移只加值、不写数据，安全。
+- **必须用 AUTOCOMMIT 执行**：``ALTER TYPE ... ADD VALUE`` 会给这个枚举类型
+  加锁，而 ``audit_log.operator_type`` / ``order_status_log.operator_type``
+  两列都在用它——锁不放开，这两张表的写入就被阻塞。
+  在普通事务里执行，锁会一直持到事务提交（也就是整条迁移链跑完），
+  部署窗口里正好是业务写入最密集的时候。
+  放进 ``autocommit_block()``：这条语句自己就是一个事务，
+  加完值立刻提交、锁立刻放开，只持瞬时锁。
+  （PG 12 起允许在事务里跑 ADD VALUE，但这里要的是「立即提交」这个效果。）
+- **应用代码开始写 PLATFORM_FINANCE 之前，0006 必须已经执行**。
+  枚举里没有这个取值时，往 operator_type 列写它会直接报错：
+  ``invalid input value for enum operator_type: "PLATFORM_FINANCE"``。
+  所以部署顺序是：先跑迁移，再上新代码。
 - 用 ``IF NOT EXISTS``：枚举取值加上去就下不来了，downgrade 只能空转，
   于是「downgrade 到 0005 再 upgrade 回 head」这条路径会重复加同一个值。
   加上 IF NOT EXISTS，这条路径才是幂等的。
@@ -38,9 +48,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TYPE operator_type ADD VALUE IF NOT EXISTS 'PLATFORM_FINANCE'"
-    )
+    # AUTOCOMMIT 隔离级别执行：加值立即提交，只持瞬时锁，
+    # 不阻塞 audit_log / order_status_log 的写入。
+    with op.get_context().autocommit_block():
+        op.execute(
+            "ALTER TYPE operator_type ADD VALUE IF NOT EXISTS 'PLATFORM_FINANCE'"
+        )
 
 
 def downgrade() -> None:
