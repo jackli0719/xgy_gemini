@@ -8,7 +8,7 @@
 - 按服务商聚合（不强求按天：同一批订单的周期由它们的完工日期决定）；
 - 佣金按 ``service_provider.commission_rate`` 算：
   ``commission = 合计 × 费率``，``net = 合计 - 佣金``（服务商实收）；
-- 逐笔条件 UPDATE 把订单转成「待结算」，并写入结算单、明细、状态流转日志。
+- 逐笔条件 UPDATE 把订单转成「待结算」，并写入结算单、明细、状态流转日志、审计日志。
 
 三条硬约束：
 
@@ -18,8 +18,16 @@
    只有一方能认领订单，不会生成两张结算单（与 service_flow / auto_confirm 同一套思路）。
 2. **rowcount == 0 就跳过**：这一笔在等锁期间被人改走了，不是错误，
    跳过、继续处理下一笔。
-3. **同一事务**：结算单 + 明细 + 订单状态 + 状态流转日志，
+3. **同一事务**：结算单 + 明细 + 订单状态 + 状态流转日志 + 审计日志，
    要么全成、要么全不成——不会出现「订单进了待结算却没有结算单」的中间态。
+
+**审计日志为什么写三条**：audit_log 的设计是「一行 = 一个字段的变更」
+（field_name + old_value + new_value）。结算单上的金额三件套
+（total_amount / commission_amount / net_amount）是三个独立的金额口径，
+各自都可能被质疑（合计对不对、佣金对不对、实收对不对）。
+挤成一行就得把三个数塞进一个字符串，查「这张单的佣金是多少」时还得
+再解析一次——既不好查，也容易在解析时丢精度。所以三个字段各记一条，
+查的时候一句 SQL 就够。
 
 **不抛业务异常给调用方**：单个服务商那一组失败只记日志、继续下一组。
 定时任务因为一个服务商的脏数据整批失败，比漏掉一个服务商更糟。
@@ -37,12 +45,13 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.order_state import assert_transition
+from app.models.audit_log import AuditLog
 from app.models.enums import OperatorType, OrderStatus, SettlementStatus
 from app.models.order import Order, OrderStatusLog
 from app.models.provider import ServiceProvider
 from app.models.settlement import Settlement, SettlementItem
 
-__all__ = ["SETTLE_REASON", "generate_pending_settlements"]
+__all__ = ["AUDIT_REASON", "SETTLE_REASON", "generate_pending_settlements"]
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +60,12 @@ SETTLE_DELAY_DAYS = 1
 
 # 状态流转日志里留下的原因
 SETTLE_REASON = "T+1 自动生成待结算"
+
+# 审计日志里留下的原因
+AUDIT_REASON = "T+1 结算单生成"
+
+# 审计日志里被审计对象的类型
+AUDIT_TARGET_TYPE = "settlement"
 
 # 系统操作没有真人，operator_id 记 0
 SYSTEM_OPERATOR_ID = 0
@@ -135,7 +150,7 @@ async def _settle_provider(
 ) -> int:
     """结算一个服务商的订单，返回实际转成「待结算」的笔数。
 
-    结算单、明细、订单状态、状态流转日志在**同一个事务**里完成。
+    结算单、明细、订单状态、状态流转日志、审计日志在**同一个事务**里完成。
     """
     async with session.begin():
         provider = await session.get(ServiceProvider, provider_id)
@@ -195,6 +210,27 @@ async def _settle_provider(
         session.add(settlement)
         # flush 一下拿自增主键，才能写明细
         await session.flush()
+
+        # 审计日志：金额三件套各记一条（理由见模块 docstring）
+        for field_name, value in (
+            ("total_amount", total),
+            ("commission_amount", commission),
+            ("net_amount", net),
+        ):
+            session.add(
+                AuditLog(
+                    operator_type=OperatorType.SYSTEM,
+                    operator_id=SYSTEM_OPERATOR_ID,
+                    target_type=AUDIT_TARGET_TYPE,
+                    target_id=settlement.id,
+                    provider_id=provider_id,
+                    field_name=field_name,
+                    # 结算单是新建的，之前没有值 -> old_value 为空
+                    old_value=None,
+                    new_value=str(value),
+                    reason=AUDIT_REASON,
+                )
+            )
 
         for row in claimed:
             session.add(

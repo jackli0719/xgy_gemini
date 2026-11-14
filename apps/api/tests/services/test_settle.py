@@ -6,7 +6,7 @@
   service 的签名与时间归一；
 - **集成测试**（需要真实 PostgreSQL）：真的走 service -> 数据库，
   验证同一服务商聚成一张结算单、未满 T+1 不结算、不同服务商分开、
-  幂等、以及并发跑只生成一次。
+  幂等、并发跑只生成一次、结算单留审计日志、以及一个服务商失败不拖垮整批。
 
 集成测试用的数据库是 TEST_DATABASE_URL 指向的独立测试库
 （集成 fixture 每次 drop_all + create_all，绝不碰开发库）。
@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models.address import Address
+from app.models.audit_log import AuditLog
 from app.models.base import Base
 from app.models.catalog import ServiceCategory, ServiceItem
 from app.models.enums import (
@@ -41,7 +42,9 @@ from app.models.schedule_slot import ScheduleSlot
 from app.models.settlement import Settlement, SettlementItem
 from app.models.user import User
 from app.scripts import settle_job
+from app.services import settle as settle_service
 from app.services.settle import (
+    AUDIT_REASON,
     SETTLE_DELAY_DAYS,
     SETTLE_REASON,
     _resolve_now,
@@ -397,6 +400,17 @@ async def _logs_of(db, order_id: int) -> list[OrderStatusLog]:
         return list(rows)
 
 
+async def _audit_logs_of(
+    db, *, target_id: int | None = None
+) -> list[AuditLog]:
+    maker = _maker(db)
+    async with maker() as session:
+        query = select(AuditLog).order_by(AuditLog.id)
+        if target_id is not None:
+            query = query.where(AuditLog.target_id == target_id)
+        return list((await session.execute(query)).scalars().all())
+
+
 # ---------------------------------------------------------------------
 # 1. 同一服务商的多笔订单聚成一张结算单
 # ---------------------------------------------------------------------
@@ -582,3 +596,115 @@ async def test_concurrent_runs_generate_settlement_once(db, seeded, caplog) -> N
     assert errors == [], "并发结算不应该产生异常日志：{}".format(
         [record.getMessage() for record in errors]
     )
+
+
+# ---------------------------------------------------------------------
+# 6. 生成结算单要留审计日志
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_settlement_writes_audit_log(db, seeded) -> None:
+    """结算单一落库，金额三件套就各留下一条审计日志。
+
+    审计日志和结算单在同一个事务里——没审计日志的结算单等于没记录。
+    """
+    count = await _run(db)
+    assert count == 3
+
+    settlements = await _settlements_of(db)
+    assert len(settlements) == 2
+
+    for settlement in settlements:
+        logs = await _audit_logs_of(db, target_id=settlement.id)
+
+        # 金额三个字段各一条，不多不少
+        assert len(logs) == 3
+        assert sorted(log.field_name for log in logs) == [
+            "commission_amount",
+            "net_amount",
+            "total_amount",
+        ]
+
+        by_field = {log.field_name: log for log in logs}
+        for log in logs:
+            assert log.target_type == "settlement"
+            assert log.target_id == settlement.id
+            assert log.provider_id == settlement.provider_id
+            assert log.operator_type == OperatorType.SYSTEM
+            assert log.operator_id == 0
+            assert log.reason == AUDIT_REASON
+            # 结算单是新建的，之前没有值
+            assert log.old_value is None
+
+        assert by_field["total_amount"].new_value == str(settlement.total_amount)
+        assert (
+            by_field["commission_amount"].new_value
+            == str(settlement.commission_amount)
+        )
+        assert by_field["net_amount"].new_value == str(settlement.net_amount)
+
+    # 两张结算单 -> 六条审计日志
+    assert len(await _audit_logs_of(db)) == 6
+
+
+# ---------------------------------------------------------------------
+# 7. 一个服务商出错，不影响其他服务商
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_provider_failure_does_not_stop_others(
+    db, seeded, monkeypatch, caplog
+) -> None:
+    """服务商甲那一组炸了，乙照常结算，整体也不抛异常。
+
+    定时任务因为一个服务商的脏数据整批失败，比漏掉一个服务商更糟——
+    所以单组失败只记日志、继续下一组。
+    """
+    real_settle = settle_service._settle_provider
+
+    async def flaky_settle(session, *, provider_id, rows, now):
+        if provider_id == PROVIDER_A_ID:
+            raise RuntimeError("模拟服务商甲的脏数据")
+        return await real_settle(
+            session, provider_id=provider_id, rows=rows, now=now
+        )
+
+    monkeypatch.setattr(settle_service, "_settle_provider", flaky_settle)
+
+    with caplog.at_level("ERROR", logger="app.services.settle"):
+        # 不抛异常
+        count = await _run(db)
+
+    # (a) 乙照常结算，金额正确
+    assert count == 1
+
+    b_settlements = await _settlements_of(db, provider_id=PROVIDER_B_ID)
+    assert len(b_settlements) == 1
+    b_settlement = b_settlements[0]
+    assert b_settlement.total_amount == Decimal("200.00")
+    assert b_settlement.commission_amount == Decimal("20.00")
+    assert b_settlement.net_amount == Decimal("180.00")
+
+    b_order = await _order_of(db, ORDER_B1_ID)
+    assert b_order.status == OrderStatus.PENDING_SETTLE
+
+    b_items = await _items_of(db, settlement_id=b_settlement.id)
+    assert [item.order_id for item in b_items] == [ORDER_B1_ID]
+
+    # (b) 甲：订单仍是「已完成」，没有结算单、没有明细、没有状态流转日志
+    assert await _settlements_of(db, provider_id=PROVIDER_A_ID) == []
+
+    all_items = await _items_of(db)
+    assert [item.order_id for item in all_items] == [ORDER_B1_ID]
+
+    for order_id in (ORDER_A1_ID, ORDER_A2_ID):
+        order = await _order_of(db, order_id)
+        assert order.status == OrderStatus.COMPLETED
+        assert await _logs_of(db, order_id) == []
+
+    # 失败的这一组确实被记了日志（不是悄悄吞掉）
+    errors = [record for record in caplog.records if record.levelno >= logging.ERROR]
+    assert any("provider_id={}".format(PROVIDER_A_ID) in record.getMessage() for record in errors)
+
