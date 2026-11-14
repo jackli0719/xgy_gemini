@@ -11,11 +11,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, CreatedAtMixin
+from app.models.base import Base, TimestampMixin
 from app.models.enums import CatalogStatus, pg_enum
 
 
-class ServiceCategory(Base, CreatedAtMixin):
+class ServiceCategory(Base, TimestampMixin):
     """服务分类，支持自引用形成树（parent_id 为空即一级分类）。"""
 
     __tablename__ = "service_category"
@@ -44,7 +44,7 @@ class ServiceCategory(Base, CreatedAtMixin):
     )
 
 
-class ServiceItem(Base, CreatedAtMixin):
+class ServiceItem(Base, TimestampMixin):
     """服务项目（可下单的具体服务与价格）。"""
 
     __tablename__ = "service_item"

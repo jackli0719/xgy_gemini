@@ -67,12 +67,16 @@ class OrderStatus(str, Enum):
 
 
 class OperatorType(str, Enum):
-    """订单状态流转的操作方类型。"""
+    """订单状态流转的操作方类型。
+
+    服务商侧区分管理员与普通员工，供 R3「非授权角色可触发金额变更」审计判定使用。
+    """
 
     USER = "USER"
     MASTER = "MASTER"
-    PROVIDER = "PROVIDER"
-    PLATFORM = "PLATFORM"
+    PROVIDER_ADMIN = "PROVIDER_ADMIN"
+    PROVIDER_STAFF = "PROVIDER_STAFF"
+    PLATFORM_ADMIN = "PLATFORM_ADMIN"
     SYSTEM = "SYSTEM"
 
 

@@ -43,7 +43,14 @@ ORDER_STATUS = (
     "REFUNDING",
     "REFUNDED",
 )
-OPERATOR_TYPE = ("USER", "MASTER", "PROVIDER", "PLATFORM", "SYSTEM")
+OPERATOR_TYPE = (
+    "USER",
+    "MASTER",
+    "PROVIDER_ADMIN",
+    "PROVIDER_STAFF",
+    "PLATFORM_ADMIN",
+    "SYSTEM",
+)
 
 # 枚举类型由本迁移显式创建，表定义中一律 create_type=False，避免重复 CREATE TYPE
 user_status = postgresql.ENUM(*USER_STATUS, name="user_status", create_type=False)
@@ -197,6 +204,12 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("now()"),
         ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(
             ["parent_id"],
@@ -224,6 +237,12 @@ def upgrade() -> None:
         ),
         sa.Column(
             "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at",
             sa.DateTime(timezone=True),
             nullable=False,
             server_default=sa.text("now()"),
@@ -361,9 +380,11 @@ def downgrade() -> None:
     op.drop_table("address")
 
     op.drop_index("ix_service_item_category_id", table_name="service_item")
+    op.drop_column("service_item", "updated_at")
     op.drop_table("service_item")
 
     op.drop_index("ix_service_category_parent_id", table_name="service_category")
+    op.drop_column("service_category", "updated_at")
     op.drop_table("service_category")
 
     op.drop_index("ix_master_provider_id", table_name="master")
