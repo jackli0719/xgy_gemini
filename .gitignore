@@ -1,0 +1,30 @@
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+*.tgz
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# 日志与本地数据
+logs/
+*.log
+*.sqlite3
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store

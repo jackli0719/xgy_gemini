@@ -1,0 +1,2 @@
+# 后端依赖清单占位
+# 具体依赖（FastAPI / SQLAlchemy / Alembic / Redis 等）在后续任务卡中按需补充。
