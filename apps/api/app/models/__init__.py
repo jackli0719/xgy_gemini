@@ -13,6 +13,7 @@ from app.models.enums import (
     OrderStatus,
     PayStatus,
     ProviderStatus,
+    UserRole,
     UserStatus,
 )
 from app.models.order import Order, OrderStatusLog
@@ -40,5 +41,6 @@ __all__ = [
     "ServiceProvider",
     "TimestampMixin",
     "User",
+    "UserRole",
     "UserStatus",
 ]

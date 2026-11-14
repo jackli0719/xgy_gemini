@@ -16,6 +16,28 @@ class UserStatus(str, Enum):
     BANNED = "BANNED"
 
 
+class UserRole(str, Enum):
+    """用户角色。
+
+    角色与「是否归属某个服务商」强绑定：只有 PROVIDER_ADMIN / PROVIDER_STAFF
+    带 provider_id，其余角色必须没有（数据库 CHECK 约束 ck_user_role_provider 强制）。
+
+    注意 MASTER（师傅）：师傅的归属权威来源是 master 表，不是 user.provider_id。
+    一个师傅可能同时是某个服务商的管理员，但「这个用户对应哪个师傅身份」
+    只能查 master 表——user.provider_id 记的是**登录账号**的服务商归属，
+    与师傅身份是两回事。技术债：两者没有在模型层做一致性校验。
+    """
+
+    USER = "USER"
+    MASTER = "MASTER"
+    PROVIDER_ADMIN = "PROVIDER_ADMIN"
+    PROVIDER_STAFF = "PROVIDER_STAFF"
+    PLATFORM_ADMIN = "PLATFORM_ADMIN"
+    PLATFORM_OPS = "PLATFORM_OPS"
+    PLATFORM_FINANCE = "PLATFORM_FINANCE"
+    PLATFORM_CS = "PLATFORM_CS"
+
+
 class ProviderStatus(str, Enum):
     """服务商状态。"""
 

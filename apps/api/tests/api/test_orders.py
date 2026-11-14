@@ -35,7 +35,7 @@ from app.main import app
 from app.models.address import Address
 from app.models.base import Base
 from app.models.catalog import ServiceCategory, ServiceItem
-from app.models.enums import CatalogStatus, OrderStatus
+from app.models.enums import CatalogStatus, OrderStatus, UserRole
 from app.models.order import Order
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
@@ -67,7 +67,13 @@ _WRONG_SECRET = "wrong-secret-for-negative-tests-only-0123456789abcdef"
 
 
 def _auth_header(user_id: int, **kwargs) -> dict[str, str]:
-    """生成带合法 token 的请求头。"""
+    """生成带合法 token 的请求头。
+
+    默认身份是普通 C 端用户（role=USER、provider_id=None）——
+    下单接口只认 user_id，测试用不到服务商身份。
+    """
+    kwargs.setdefault("role", UserRole.USER)
+    kwargs.setdefault("provider_id", None)
     token = create_access_token(user_id, **kwargs)
     return {"Authorization": "Bearer {}".format(token)}
 
