@@ -74,7 +74,7 @@ jobs:
       REQUIRE_INTEGRATION: "1"
       # 集成测试数量下限。与 infra/compose/docker-compose.dev.yml 里的
       # 同名值保持一致；新增集成测试时两边一起改。
-      EXPECTED_INTEGRATION_TESTS: "263"
+      EXPECTED_INTEGRATION_TESTS: "276"
     defaults:
       run:
         working-directory: apps/api
@@ -178,13 +178,21 @@ jobs:
       - name: 准备审查输入（规则 + diff）
         id: prep
         env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # base 的提交不在 head 的历史里时单独抓一次
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
-          git diff --unified=3 "$BASE_SHA...$HEAD_SHA" > /tmp/pr.diff
+          # base 分支的完整历史：合并基点（merge base）常常在 base 的历史里
+          # 而不是 head 的历史里——PR 分支从旧 main 拉出来、期间 main 又被
+          # 合了新东西时，base 的 tip 并不是 head 的祖先，三点 diff 会直接
+          # 报 "no merge base"。
+          git fetch --no-tags origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          # 合并基点 = base 与 head 的最近公共祖先，也就是 GitHub 上这个 PR
+          # 展示的那份 diff 的起点
+          base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
+          echo "合并基点：$base"
+          git diff --unified=3 "$base" "$HEAD_SHA" > /tmp/pr.diff
           {
             echo "下面是一次 pull request 的改动。请按「审查规则」一节审查。"
             echo "只输出规则里约定格式的 JSON 数组，不要输出别的文字。"
