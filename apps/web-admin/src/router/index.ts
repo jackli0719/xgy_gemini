@@ -28,7 +28,13 @@ import {
 } from "vue-router";
 
 import { useSessionStore } from "@/stores/session";
-import { PLATFORM_ROLES, PROVIDER_ROLES, homePathForRole } from "@/utils/role";
+import {
+  PLATFORM_ADMIN,
+  PLATFORM_FINANCE,
+  PLATFORM_ROLES,
+  PROVIDER_ROLES,
+  homePathForRole,
+} from "@/utils/role";
 
 /**
  * 造路由表。
@@ -68,7 +74,15 @@ export function buildRoutes(pinia: Pinia): RouteRecordRaw[] {
       name: "platform-providers",
       component: () => import("@/views/PlatformProvidersView.vue"),
       // 服务商入驻 / 冻结是管理动作，只有平台管理员能进
-      meta: { requiresRoles: ["PLATFORM_ADMIN"] },
+      meta: { requiresRoles: [PLATFORM_ADMIN] },
+    },
+    {
+      path: "/platform/settlements",
+      name: "platform-settlements",
+      component: () => import("@/views/PlatformSettlementsView.vue"),
+      // 结算确认：平台财务与平台管理员都能进这页
+      // （数据接口后端只放 PLATFORM_FINANCE）
+      meta: { requiresRoles: [PLATFORM_FINANCE, PLATFORM_ADMIN] },
     },
     {
       path: "/platform/orders",

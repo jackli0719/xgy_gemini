@@ -119,6 +119,7 @@ type CreatePlatformProviderOp = operations["create_platform_provider_api_v1_plat
 type UpdatePlatformProviderStatusOp = operations["update_platform_provider_status_api_v1_platform_providers__provider_id__patch"];
 type CreatePlatformProviderAdminOp = operations["create_platform_provider_admin_api_v1_platform_providers__provider_id__admin_post"];
 type ListPlatformOrdersOp = operations["list_platform_orders_api_v1_platform_orders_get"];
+type ListPlatformSettlementsOp = operations["list_platform_settlements_api_v1_platform_settlements_get"];
 type ListPlatformCategoriesOp = operations["list_platform_categories_api_v1_platform_categories_get"];
 type CreatePlatformCategoryOp = operations["create_platform_category_api_v1_platform_categories_post"];
 type UpdatePlatformCategoryOp = operations["update_platform_category_api_v1_platform_categories__category_id__patch"];
@@ -496,6 +497,25 @@ export function createApiClient(options: ApiClientOptions = {}) {
       params: QueryParamsOf<ListPlatformOrdersOp> = {},
     ): Promise<ResponseOf<ListPlatformOrdersOp>> {
       return send<ListPlatformOrdersOp>("GET", "/api/v1/platform/orders", {
+        query: {
+          status: params.status ?? undefined,
+          provider_id: params.provider_id ?? undefined,
+          page: params.page,
+          limit: params.limit,
+        },
+      });
+    },
+
+    /**
+     * 平台结算单列表（可按状态 / 服务商筛选）。
+     *
+     * 只有平台财务能调（服务端按 token 里的角色判，其他角色一律 403）。
+     * `status` / `provider_id` 省略表示不按它筛选。
+     */
+    listPlatformSettlements(
+      params: QueryParamsOf<ListPlatformSettlementsOp> = {},
+    ): Promise<ResponseOf<ListPlatformSettlementsOp>> {
+      return send<ListPlatformSettlementsOp>("GET", "/api/v1/platform/settlements", {
         query: {
           status: params.status ?? undefined,
           provider_id: params.provider_id ?? undefined,

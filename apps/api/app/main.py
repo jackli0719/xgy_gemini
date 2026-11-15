@@ -28,6 +28,7 @@ from app.api.v1.pay import router as pay_router
 from app.api.v1.platform import router as platform_router
 from app.api.v1.platform_catalog import router as platform_catalog_router
 from app.api.v1.platform_orders import router as platform_orders_router
+from app.api.v1.platform_settlements import router as platform_settlements_router
 from app.api.v1.provider import router as provider_router
 from app.api.v1.settlements import router as settlements_router
 from app.domain.slot_rule import SlotError
@@ -67,6 +68,8 @@ app.include_router(platform_router)
 app.include_router(platform_orders_router)
 # 平台侧目录管理（品类树 / 服务项 / 改价）
 app.include_router(platform_catalog_router)
+# 平台侧结算单列表（只有平台财务能看）
+app.include_router(platform_settlements_router)
 # 登录是唯一不需要 token 的业务接口（它本身就是拿 token 的入口）
 app.include_router(auth_router)
 

@@ -14,15 +14,36 @@
 export const PLATFORM_ADMIN = "PLATFORM_ADMIN";
 /** 平台运营（能看订单总览、管目录，但管不了服务商入驻）。 */
 export const PLATFORM_OPS = "PLATFORM_OPS";
+/** 平台财务（确认结算：结算单列表只有这个角色能看）。 */
+export const PLATFORM_FINANCE = "PLATFORM_FINANCE";
 
 /** 服务商侧角色（派单 / 师傅管理）。 */
 export const PROVIDER_ROLES = ["PROVIDER_ADMIN", "PROVIDER_STAFF"] as const;
 
-/** 平台侧角色（订单总览 / 品类管理）。 */
+/** 平台侧「运营」角色（订单总览 / 品类管理）。 */
 export const PLATFORM_ROLES = [PLATFORM_ADMIN, PLATFORM_OPS] as const;
 
-/** 是不是平台侧角色。 */
+/**
+ * 平台侧全部角色（含财务）。
+ *
+ * 与 {@link PLATFORM_ROLES} 的区别：财务**不**进运营页面
+ * （订单总览、品类管理后端只放 PLATFORM_ADMIN / PLATFORM_OPS，
+ * 让财务进去只会拿到 403），但它仍然是平台账号——标题该显示
+ * 「平台管理后台」，而不是「服务商后台」。
+ */
+export const PLATFORM_ALL_ROLES = [
+  PLATFORM_ADMIN,
+  PLATFORM_OPS,
+  PLATFORM_FINANCE,
+] as const;
+
+/** 是不是平台侧角色（含财务）——用来判断「这是不是平台账号」。 */
 export function isPlatformRole(role: string | undefined | null): boolean {
+  return PLATFORM_ALL_ROLES.includes(role as (typeof PLATFORM_ALL_ROLES)[number]);
+}
+
+/** 是不是平台侧「运营」角色（管理员 / 运营，不含财务）。 */
+export function isPlatformOpsRole(role: string | undefined | null): boolean {
   return PLATFORM_ROLES.includes(role as (typeof PLATFORM_ROLES)[number]);
 }
 
@@ -52,6 +73,8 @@ export function appTitleForRole(role: string | undefined | null): string {
 export function homePathForRole(role: string | undefined | null): string {
   if (role === PLATFORM_ADMIN) return "/platform/providers";
   if (role === PLATFORM_OPS) return "/platform/orders";
+  // 财务能进的平台页面只有结算确认——落在那儿
+  if (role === PLATFORM_FINANCE) return "/platform/settlements";
   if (isProviderRole(role)) return "/provider/dispatch";
   return "/login";
 }

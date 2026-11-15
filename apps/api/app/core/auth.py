@@ -43,6 +43,7 @@ __all__ = [
     "is_valid_role_provider_pair",
     "require_master_scope",
     "require_platform_admin",
+    "require_platform_finance",
     "require_platform_staff",
     "require_provider_scope",
 ]
@@ -252,6 +253,28 @@ async def require_platform_staff(
     边界在「角色」上，不在「归属」上。
     """
     if current.role not in PLATFORM_STAFF_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=FORBIDDEN_DETAIL,
+        )
+    return current
+
+
+async def require_platform_finance(
+    current: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """FastAPI 依赖：要求当前用户是平台财务（PLATFORM_FINANCE 角色）。
+
+    通过条件：角色是 PLATFORM_FINANCE。不满足 -> 403 Forbidden，
+    消息与别处的越权失败一致（不区分「角色不对」还是「没带归属」）。
+
+    **为什么单独一道门**：钱相关的动作（确认结算）只有财务能做，
+    与「平台运营」（看订单总览、管目录）不是一回事——运营看得见单子，
+    但不能替财务确认结算单。
+
+    失败发生在**碰库之前**：角色不对的账号连「有几张待结算单」都问不到。
+    """
+    if current.role is not UserRole.PLATFORM_FINANCE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=FORBIDDEN_DETAIL,

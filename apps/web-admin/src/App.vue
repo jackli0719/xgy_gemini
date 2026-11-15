@@ -69,6 +69,21 @@ function logout(): void {
             品类管理
           </router-link>
         </template>
+        <!--
+          结算确认：平台财务与平台管理员看得到。
+          单独一块，不跟上面的运营菜单混：财务进不了订单总览 / 品类管理
+          （后端只放 PLATFORM_ADMIN / PLATFORM_OPS），混在一起会让它
+          点进去只拿到 403。
+        -->
+        <template v-if="session.isPlatformFinance || session.isPlatformAdmin">
+          <router-link
+            class="app-nav-link"
+            data-test="platform-settlements-link"
+            to="/platform/settlements"
+          >
+            结算确认
+          </router-link>
+        </template>
       </nav>
       <div v-if="session.isLoggedIn" class="app-user">
         <span data-test="current-user">
