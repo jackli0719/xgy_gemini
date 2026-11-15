@@ -29,6 +29,10 @@ function logout(): void {
   <el-container>
     <el-header class="app-header">
       <span class="app-title">OTO 服务商后台</span>
+      <nav class="app-nav" data-test="app-nav">
+        <router-link class="app-nav-link" to="/provider/dispatch">派单</router-link>
+        <router-link class="app-nav-link" to="/provider/masters">师傅管理</router-link>
+      </nav>
       <div v-if="session.isLoggedIn" class="app-user">
         <span data-test="current-user">
           {{ session.currentUser?.nickname }} · {{ providerLabel }}
@@ -56,6 +60,21 @@ function logout(): void {
 
 .app-title {
   font-weight: 600;
+}
+
+.app-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.app-nav-link {
+  color: #606266;
+  text-decoration: none;
+}
+
+.app-nav-link:hover {
+  color: #409eff;
 }
 
 .app-user {

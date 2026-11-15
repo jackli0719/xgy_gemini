@@ -53,6 +53,10 @@ from app.services.errors import (
     MasterNotFoundError,
     OrderNotFoundError,
 )
+from app.services.provider_scope import (
+    MASTER_NOT_FOUND_DETAIL,
+    operator_type_for_provider_role,
+)
 
 __all__ = ["dispatchable_scope", "dispatch_order"]
 
@@ -65,16 +69,6 @@ DISPATCH_REASON = "服务商派单"
 # 所以「别家的订单」和「根本不存在的订单」在响应里完全一样，
 # 攻击者无法据此判断某个订单号是否真实存在（R1）。
 _ORDER_NOT_FOUND_DETAIL = "订单不存在：order_id={order_id}"
-
-# 同理，师傅的「不存在」与「属于别家」共用这一句。
-_MASTER_NOT_FOUND_DETAIL = "师傅不存在：master_id={master_id}"
-
-# 服务商侧角色 -> 状态流转日志里的操作方类型。
-# 两套枚举的取值在这一段是对齐的（见 app/models/enums.py）。
-_OPERATOR_TYPE_BY_ROLE: dict[UserRole, OperatorType] = {
-    UserRole.PROVIDER_ADMIN: OperatorType.PROVIDER_ADMIN,
-    UserRole.PROVIDER_STAFF: OperatorType.PROVIDER_STAFF,
-}
 
 
 def dispatchable_scope(provider_id: int):
@@ -135,7 +129,7 @@ async def dispatch_order(
         ).scalar_one_or_none()
         if master is None or master.provider_id != provider_id:
             raise MasterNotFoundError(
-                _MASTER_NOT_FOUND_DETAIL.format(master_id=master_id)
+                MASTER_NOT_FOUND_DETAIL.format(master_id=master_id)
             )
 
         now = datetime.now(timezone.utc)
@@ -250,8 +244,11 @@ def _operator_type_for(role: UserRole) -> OperatorType:
     非服务商侧角色一律拒绝：派单是服务商侧动作，
     平台角色（PLATFORM_ADMIN 等）走的是平台自己的运营入口，
     不该混进服务商侧的派单流水里。
+
+    映射本身在 app.services.provider_scope 里（师傅管理那条链路也用它），
+    这里只决定「不是服务商侧角色时怎么办」。
     """
-    try:
-        return _OPERATOR_TYPE_BY_ROLE[role]
-    except KeyError:
-        raise DispatchForbiddenError("当前角色不能派单") from None
+    operator_type = operator_type_for_provider_role(role)
+    if operator_type is None:
+        raise DispatchForbiddenError("当前角色不能派单")
+    return operator_type

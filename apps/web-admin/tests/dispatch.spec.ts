@@ -56,8 +56,20 @@ const ORDERS = {
 
 const MASTERS = {
   items: [
-    { id: 201, real_name: "师傅甲", rating: "4.5", status: "ACTIVE" },
-    { id: 202, real_name: "师傅乙", rating: null, status: "PENDING" },
+    {
+      id: 201,
+      real_name: "师傅甲",
+      phone: "13800000005",
+      rating: "4.5",
+      status: "ACTIVE",
+    },
+    {
+      id: 202,
+      real_name: "师傅乙",
+      phone: "13800000006",
+      rating: null,
+      status: "PENDING",
+    },
   ],
   total: 2,
 };

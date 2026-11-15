@@ -110,6 +110,7 @@ type DeleteAddressOp = operations["delete_address_api_v1_addresses__address_id__
 type LoginOp = operations["login_api_v1_auth_login_post"];
 type ListProviderOrdersOp = operations["list_provider_orders_api_v1_provider_orders_get"];
 type ListProviderMastersOp = operations["list_provider_masters_api_v1_provider_masters_get"];
+type UpdateProviderMasterOp = operations["update_provider_master_api_v1_provider_masters__master_id__patch"];
 
 /** 从错误响应体里挑出文案。 */
 function detailOf(body: unknown): string | undefined {
@@ -343,9 +344,26 @@ export function createApiClient(options: ApiClientOptions = {}) {
       });
     },
 
-    /** 本商师傅列表（id / 姓名 / 评分 / 状态）。 */
+    /** 本商师傅列表（id / 姓名 / 手机号 / 评分 / 状态）。 */
     listProviderMasters(): Promise<ResponseOf<ListProviderMastersOp>> {
       return send<ListProviderMastersOp>("GET", "/api/v1/provider/masters");
+    },
+
+    /**
+     * 改本商师傅的状态（启用 / 休假 / 停用）。
+     *
+     * **不传 provider_id**：能改哪个师傅由服务端按 token 里的归属决定，
+     * 改别家的师傅会得到 404。
+     */
+    updateProviderMaster(
+      params: PathParamsOf<UpdateProviderMasterOp>,
+      body: RequestBodyOf<UpdateProviderMasterOp>,
+    ): Promise<ResponseOf<UpdateProviderMasterOp>> {
+      return send<UpdateProviderMasterOp>(
+        "PATCH",
+        `/api/v1/provider/masters/${encodeURIComponent(String(params.master_id))}`,
+        { body },
+      );
     },
 
     // -----------------------------------------------------------------

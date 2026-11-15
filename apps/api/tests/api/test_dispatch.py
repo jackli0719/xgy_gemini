@@ -150,14 +150,25 @@ def test_dispatch_service_signature_takes_no_provider_id() -> None:
 
 
 def test_operator_type_mapping_only_covers_provider_roles() -> None:
-    """只有服务商侧角色能映射成操作方类型。"""
-    mapping = dispatch_module._OPERATOR_TYPE_BY_ROLE
-    assert mapping[UserRole.PROVIDER_ADMIN] is OperatorType.PROVIDER_ADMIN
-    assert mapping[UserRole.PROVIDER_STAFF] is OperatorType.PROVIDER_STAFF
-    # 平台角色与普通用户都不在派单映射表里
-    assert UserRole.PLATFORM_ADMIN not in mapping
-    assert UserRole.USER not in mapping
-    assert UserRole.MASTER not in mapping
+    """只有服务商侧角色能映射成操作方类型。
+
+    映射表现在住在 ``app.services.provider_scope``（派单与师傅管理共用一份，
+    见那里模块头的说明），这里盯的仍是「只覆盖服务商侧角色」这条不变式。
+    """
+    from app.services.provider_scope import operator_type_for_provider_role
+
+    assert (
+        operator_type_for_provider_role(UserRole.PROVIDER_ADMIN)
+        is OperatorType.PROVIDER_ADMIN
+    )
+    assert (
+        operator_type_for_provider_role(UserRole.PROVIDER_STAFF)
+        is OperatorType.PROVIDER_STAFF
+    )
+    # 平台角色与普通用户都不在服务商侧映射表里
+    assert operator_type_for_provider_role(UserRole.PLATFORM_ADMIN) is None
+    assert operator_type_for_provider_role(UserRole.USER) is None
+    assert operator_type_for_provider_role(UserRole.MASTER) is None
 
 
 def test_operator_type_for_rejects_non_provider_role() -> None:

@@ -32,6 +32,11 @@ export const routes = [
     name: "provider-dispatch",
     component: () => import("@/views/ProviderDispatchView.vue"),
   },
+  {
+    path: "/provider/masters",
+    name: "provider-masters",
+    component: () => import("@/views/ProviderMastersView.vue"),
+  },
 ];
 
 export function createAppRouter(

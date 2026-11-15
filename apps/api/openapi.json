@@ -1267,7 +1267,7 @@
           "provider"
         ],
         "summary": "本商师傅列表",
-        "description": "列出本商的师傅（id / 姓名 / 评分 / 状态）。\n\n所有状态的师傅都返回（含停用 / 休假），由派单的人自己挑。",
+        "description": "列出本商的师傅（id / 姓名 / 手机号 / 评分 / 状态）。\n\n所有状态的师傅都返回（含停用 / 休假），由派单的人自己挑。",
         "operationId": "list_provider_masters_api_v1_provider_masters_get",
         "parameters": [
           {
@@ -1294,6 +1294,75 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProviderMasterListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/provider/masters/{master_id}": {
+      "patch": {
+        "tags": [
+          "provider"
+        ],
+        "summary": "改本商师傅状态",
+        "description": "把本商师傅改成指定状态（启用 / 休假 / 停用）。\n\n师傅不属于本商，或这个师傅不存在，都是同一个 404、同一句话\n（不泄露存在性）。",
+        "operationId": "update_provider_master_api_v1_provider_masters__master_id__patch",
+        "parameters": [
+          {
+            "name": "master_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Master Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMasterStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderMasterItem"
                 }
               }
             }
@@ -2103,6 +2172,11 @@
             "title": "Real Name",
             "description": "师傅姓名"
           },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "师傅登录账号的手机号"
+          },
           "rating": {
             "anyOf": [
               {
@@ -2125,10 +2199,11 @@
         "required": [
           "id",
           "real_name",
+          "phone",
           "status"
         ],
         "title": "ProviderMasterItem",
-        "description": "本商师傅的一项。\n\n``rating`` 可以是空：还没被评价过的师傅没有分数。"
+        "description": "本商师傅的一项。\n\n``rating`` 可以是空：还没被评价过的师傅没有分数。\n``phone`` 是师傅登录账号的手机号（master 表上没有这一列，\n来自它关联的 user）。"
       },
       "ProviderMasterListResponse": {
         "properties": {
@@ -2389,6 +2464,16 @@
         "title": "ServiceItemSummary",
         "description": "服务项摘要（可下单的具体服务与价格）。"
       },
+      "SettableMasterStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "ON_LEAVE",
+          "DISABLED"
+        ],
+        "title": "SettableMasterStatus",
+        "description": "服务商可以设置的师傅状态。\n\n比 ``MasterStatus`` 少一个 ``PENDING``：PENDING 是入驻流程的初始状态\n（师傅已登记、还没通过审核），由平台侧的入驻卡产生。服务商不能把它\n写回去——否则一个没通过审核的师傅会重新变成「可派单」的状态。"
+      },
       "SettlementStatus": {
         "type": "string",
         "enum": [
@@ -2458,6 +2543,21 @@
         ],
         "title": "SlotAvailability",
         "description": "某个时段的可预约情况。\n\n``available`` = capacity - used，只返回 available > 0 的时段。\n容量与已占用数一起返回，是为了让前端能显示「还剩几个」，\n而不是让前端自己算一遍（两边的口径容易不一致）。"
+      },
+      "UpdateMasterStatusRequest": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SettableMasterStatus",
+            "description": "要把师傅改成什么状态"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "UpdateMasterStatusRequest",
+        "description": "改师傅状态的请求体。\n\n**只有 status 一个字段**：master_id 从路径来，服务商归属从 token 来。\n带上别的字段（比如 provider_id）会被 ``extra=\"forbid\"`` 直接 422，\n而不是被静默忽略——静默忽略会让人以为字段生效了。"
       },
       "UserRole": {
         "type": "string",

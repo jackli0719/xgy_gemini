@@ -394,7 +394,7 @@ export interface paths {
         };
         /**
          * 本商师傅列表
-         * @description 列出本商的师傅（id / 姓名 / 评分 / 状态）。
+         * @description 列出本商的师傅（id / 姓名 / 手机号 / 评分 / 状态）。
          *
          *     所有状态的师傅都返回（含停用 / 休假），由派单的人自己挑。
          */
@@ -405,6 +405,29 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider/masters/{master_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 改本商师傅状态
+         * @description 把本商师傅改成指定状态（启用 / 休假 / 停用）。
+         *
+         *     师傅不属于本商，或这个师傅不存在，都是同一个 404、同一句话
+         *     （不泄露存在性）。
+         */
+        patch: operations["update_provider_master_api_v1_provider_masters__master_id__patch"];
         trace?: never;
     };
     "/api/v1/auth/login": {
@@ -939,6 +962,8 @@ export interface components {
          * @description 本商师傅的一项。
          *
          *     ``rating`` 可以是空：还没被评价过的师傅没有分数。
+         *     ``phone`` 是师傅登录账号的手机号（master 表上没有这一列，
+         *     来自它关联的 user）。
          */
         ProviderMasterItem: {
             /**
@@ -951,6 +976,11 @@ export interface components {
              * @description 师傅姓名
              */
             real_name: string;
+            /**
+             * Phone
+             * @description 师傅登录账号的手机号
+             */
+            phone: string;
             /**
              * Rating
              * @description 评分（0~5，可空）
@@ -1141,6 +1171,16 @@ export interface components {
             duration_min: number;
         };
         /**
+         * SettableMasterStatus
+         * @description 服务商可以设置的师傅状态。
+         *
+         *     比 ``MasterStatus`` 少一个 ``PENDING``：PENDING 是入驻流程的初始状态
+         *     （师傅已登记、还没通过审核），由平台侧的入驻卡产生。服务商不能把它
+         *     写回去——否则一个没通过审核的师傅会重新变成「可派单」的状态。
+         * @enum {string}
+         */
+        SettableMasterStatus: "ACTIVE" | "ON_LEAVE" | "DISABLED";
+        /**
          * SettlementStatus
          * @description 结算单状态。
          *
@@ -1201,6 +1241,18 @@ export interface components {
              * @description 剩余可预约数 = capacity - used
              */
             available: number;
+        };
+        /**
+         * UpdateMasterStatusRequest
+         * @description 改师傅状态的请求体。
+         *
+         *     **只有 status 一个字段**：master_id 从路径来，服务商归属从 token 来。
+         *     带上别的字段（比如 provider_id）会被 ``extra="forbid"`` 直接 422，
+         *     而不是被静默忽略——静默忽略会让人以为字段生效了。
+         */
+        UpdateMasterStatusRequest: {
+            /** @description 要把师傅改成什么状态 */
+            status: components["schemas"]["SettableMasterStatus"];
         };
         /**
          * UserRole
@@ -1943,6 +1995,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderMasterListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_provider_master_api_v1_provider_masters__master_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                master_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMasterStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderMasterItem"];
                 };
             };
             /** @description Validation Error */

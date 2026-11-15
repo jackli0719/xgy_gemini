@@ -48,6 +48,7 @@ from app.models.enums import MasterStatus, OrderStatus, PayStatus
 from app.models.order import Order
 from app.models.provider import Master
 from app.models.schedule_slot import ScheduleSlot
+from app.models.user import User
 from app.services.dispatch import dispatchable_scope
 
 __all__ = [
@@ -84,6 +85,7 @@ class ProviderMasterRow:
 
     id: int
     real_name: str
+    phone: str
     rating: Decimal | None
     status: MasterStatus
 
@@ -168,6 +170,9 @@ async def list_provider_masters(
 
     过滤条件里带着 ``provider_id``：别的服务商的师傅一律不出现。
 
+    手机号来自师傅的登录账号（master 表上没有这一列，靠 ``user_id`` 关联
+    user 表）——后台要靠它联系师傅。
+
     所有状态的师傅都返回（含停用 / 休假），``status`` 字段交给前端显示，
     由派单的人决定派给谁——服务端只负责「不越界」，不替人做经营判断。
     """
@@ -176,9 +181,11 @@ async def list_provider_masters(
             select(
                 Master.id,
                 Master.real_name,
+                User.phone,
                 Master.rating,
                 Master.status,
             )
+            .join(User, User.id == Master.user_id)
             .where(Master.provider_id == provider_id)
             .order_by(Master.id)
         )

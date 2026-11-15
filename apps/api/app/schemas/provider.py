@@ -1,17 +1,21 @@
-"""服务商侧只读查询的响应 schema。
+"""服务商侧查询 / 管理的请求与响应 schema。
 
-两个接口（待派单列表 / 本商师傅列表）**都只从 token 取服务商归属**：
+这几个接口（待派单列表 / 本商师傅列表 / 改师傅状态）**都只从 token 取服务商归属**：
 ``require_provider_scope`` 保证当前账号是服务商侧角色且带着 provider_id，
 service 直接拿它过滤。请求里**没有 provider_id 参数**——客户端自报归属
 等于让它自己挑租户，隔离当场失效（R1）。
 
 响应里也不往外发别家的东西：订单列表只含本商可派的订单（含公共待派单池），
 师傅列表只含本商师傅。
+
+师傅状态管理（PATCH /provider/masters/{master_id}）的请求体里**只有 status**：
+master_id 从路径来，归属从 token 来，能改什么由服务端说了算。
 """
 from __future__ import annotations
 
 from datetime import date, datetime, time
 from decimal import Decimal
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,6 +26,8 @@ __all__ = [
     "ProviderMasterListResponse",
     "ProviderOrderItem",
     "ProviderOrderListResponse",
+    "SettableMasterStatus",
+    "UpdateMasterStatusRequest",
 ]
 
 
@@ -65,12 +71,15 @@ class ProviderMasterItem(BaseModel):
     """本商师傅的一项。
 
     ``rating`` 可以是空：还没被评价过的师傅没有分数。
+    ``phone`` 是师傅登录账号的手机号（master 表上没有这一列，
+    来自它关联的 user）。
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id: int = Field(..., description="师傅 ID（派单接口用它）")
     real_name: str = Field(..., description="师傅姓名")
+    phone: str = Field(..., description="师傅登录账号的手机号")
     rating: Decimal | None = Field(default=None, description="评分（0~5，可空）")
     status: MasterStatus = Field(..., description="师傅状态")
 
@@ -82,3 +91,29 @@ class ProviderMasterListResponse(BaseModel):
 
     items: list[ProviderMasterItem] = Field(..., description="师傅列表")
     total: int = Field(..., description="师傅总数")
+
+
+class SettableMasterStatus(str, Enum):
+    """服务商可以设置的师傅状态。
+
+    比 ``MasterStatus`` 少一个 ``PENDING``：PENDING 是入驻流程的初始状态
+    （师傅已登记、还没通过审核），由平台侧的入驻卡产生。服务商不能把它
+    写回去——否则一个没通过审核的师傅会重新变成「可派单」的状态。
+    """
+
+    ACTIVE = "ACTIVE"
+    ON_LEAVE = "ON_LEAVE"
+    DISABLED = "DISABLED"
+
+
+class UpdateMasterStatusRequest(BaseModel):
+    """改师傅状态的请求体。
+
+    **只有 status 一个字段**：master_id 从路径来，服务商归属从 token 来。
+    带上别的字段（比如 provider_id）会被 ``extra="forbid"`` 直接 422，
+    而不是被静默忽略——静默忽略会让人以为字段生效了。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: SettableMasterStatus = Field(..., description="要把师傅改成什么状态")

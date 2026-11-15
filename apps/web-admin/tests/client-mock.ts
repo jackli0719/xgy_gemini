@@ -13,6 +13,8 @@ export const mockClient = {
   listProviderOrders: vi.fn(),
   /** GET /api/v1/provider/masters */
   listProviderMasters: vi.fn(),
+  /** PATCH /api/v1/provider/masters/{master_id} */
+  updateProviderMaster: vi.fn(),
   /** POST /api/v1/orders/{order_id}/dispatch */
   dispatchOrder: vi.fn(),
   /** POST /api/v1/auth/login */
