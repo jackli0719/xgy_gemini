@@ -7,8 +7,9 @@
  *    右边列得出这个品类下的服务项；
  * 2. **新建品类**：点「新建品类」-> 填表 -> 调 createPlatformCategory，
  *    参数正确；成功后**刷新列表**；
- * 3. **改价带 expected_status**：编辑服务项改价时，把「我以为的旧状态」
- *    一并带上（乐观锁）——服务端发现状态变了就返回 409。
+ * 3. **改价带乐观锁字段**：编辑服务项改价时，把「我以为的旧状态」
+ *    与「我以为的版本号」一并带上（乐观锁）——服务端发现这一行已经被
+ *    别人动过就返回 409。
  */
 import { flushPromises, mount, type DOMWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +33,7 @@ const CATEGORY = {
   parent_id: null,
   sort_order: 1,
   status: "ACTIVE",
+  updated_at: "2026-01-01T10:00:00Z",
   items: [
     {
       id: 21,
@@ -41,6 +43,7 @@ const CATEGORY = {
       duration_min: 60,
       status: "ACTIVE",
       created_at: "2026-01-01T10:00:00Z",
+      updated_at: "2026-01-02T10:00:00Z",
     },
   ],
   children: [
@@ -50,6 +53,7 @@ const CATEGORY = {
       parent_id: 11,
       sort_order: 2,
       status: "ACTIVE",
+      updated_at: "2026-01-01T10:00:00Z",
       items: [],
       children: [],
     },
@@ -110,6 +114,7 @@ describe("平台侧品类管理页", () => {
       duration_min: 180,
       status: "ACTIVE",
       created_at: "2026-01-04T10:00:00Z",
+      updated_at: "2026-01-04T10:00:00Z",
     });
     mockClient.updatePlatformItem.mockResolvedValue({
       ...CATEGORY.items[0],
@@ -168,7 +173,7 @@ describe("平台侧品类管理页", () => {
     expect(mockClient.listPlatformCategories).toHaveBeenCalledTimes(2);
   });
 
-  it("编辑服务项改价：调 updatePlatformItem，参数带 expected_status", async () => {
+  it("编辑服务项改价：调 updatePlatformItem，参数带乐观锁字段", async () => {
     const { wrapper } = await mountPlatformPage();
 
     await clickTreeNode(wrapper, {
@@ -198,8 +203,39 @@ describe("平台侧品类管理页", () => {
         status: "ACTIVE",
         // 乐观锁：把「我以为的旧状态」一并带上
         expected_status: "ACTIVE",
+        // 乐观锁：把「我以为的版本号」原样带回
+        expected_updated_at: "2026-01-02T10:00:00Z",
       },
     );
     expect(mockClient.listPlatformCategories).toHaveBeenCalledTimes(2);
+  });
+
+  it("编辑品类：调 updatePlatformCategory，参数带版本号", async () => {
+    const { wrapper } = await mountPlatformPage();
+
+    await clickTreeNode(wrapper, {
+      id: CATEGORY.id,
+      label: CATEGORY.name,
+      children: [],
+      raw: CATEGORY,
+    });
+
+    await wrapper.find('[data-test="edit-category-btn"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.find('[data-test="submit-category-btn"]').trigger("click");
+    await flushPromises();
+
+    expect(mockClient.updatePlatformCategory).toHaveBeenCalledTimes(1);
+    expect(mockClient.updatePlatformCategory).toHaveBeenCalledWith(
+      { category_id: 11 },
+      {
+        name: "家庭保洁",
+        sort_order: 1,
+        status: "ACTIVE",
+        expected_status: "ACTIVE",
+        expected_updated_at: "2026-01-01T10:00:00Z",
+      },
+    );
   });
 });

@@ -634,7 +634,7 @@ export interface paths {
          * 改品类（名称 / 排序 / 状态）
          * @description 把品类改成指定的样子。
          *
-         *     状态被别人改过（expected_status 对不上）-> 409。
+         *     这一行被别人改过（expected_status / expected_updated_at 对不上）-> 409。
          *     品类不存在 -> 404。
          */
         patch: operations["update_platform_category_api_v1_platform_categories__category_id__patch"];
@@ -679,8 +679,9 @@ export interface paths {
          * 改服务项（名称 / 基准价 / 时长 / 状态）
          * @description 把服务项改成指定的样子。
          *
-         *     **改价会留痕**：base_price 的 old / new 值都写进 audit_log（R3）。
-         *     状态被别人改过（expected_status 对不上）-> 409。
+         *     **改价会留痕**：base_price 的 old / new 值都写进 audit_log（R3），
+         *     new 值取自库里落下的值（``UPDATE ... RETURNING``）。
+         *     这一行被别人改过（expected_status / expected_updated_at 对不上）-> 409。
          *     服务项不存在 -> 404。
          */
         patch: operations["update_platform_item_api_v1_platform_items__item_id__patch"];
@@ -965,7 +966,7 @@ export interface components {
             name: string;
             /**
              * Base Price
-             * @description 基准价
+             * @description 基准价（最多 12 位、2 位小数）
              */
             base_price: number | string;
             /**
@@ -1558,6 +1559,12 @@ export interface components {
             /** @description 品类状态 */
             status: components["schemas"]["CatalogStatus"];
             /**
+             * Updated At
+             * Format: date-time
+             * @description 最后修改时间（乐观锁的版本号，改的时候原样带回）
+             */
+            updated_at: string;
+            /**
              * Items
              * @description 直接归属本品类的服务项（含已停用）
              */
@@ -1769,6 +1776,12 @@ export interface components {
              * @description 建档时间
              */
             created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description 最后修改时间（乐观锁的版本号，改的时候原样带回）
+             */
+            updated_at: string;
         };
         /**
          * ProviderAdminItem
@@ -2148,6 +2161,11 @@ export interface components {
             status?: components["schemas"]["CatalogStatus"] | null;
             /** @description 调用方以为的旧状态；与服务端读到的不一致时返回 409 */
             expected_status?: components["schemas"]["CatalogStatus"] | null;
+            /**
+             * Expected Updated At
+             * @description 调用方以为的版本号（这一行最后被改的时间，从列表接口原样带回）；与服务端读到的不一致时返回 409
+             */
+            expected_updated_at?: string | null;
         };
         /**
          * UpdateMasterStatusRequest
@@ -2194,7 +2212,7 @@ export interface components {
             name?: string | null;
             /**
              * Base Price
-             * @description 基准价
+             * @description 基准价（最多 12 位、2 位小数）
              */
             base_price?: number | string | null;
             /**
@@ -2206,6 +2224,11 @@ export interface components {
             status?: components["schemas"]["CatalogStatus"] | null;
             /** @description 调用方以为的旧状态；与服务端读到的不一致时返回 409 */
             expected_status?: components["schemas"]["CatalogStatus"] | null;
+            /**
+             * Expected Updated At
+             * @description 调用方以为的版本号（这一行最后被改的时间，从列表接口原样带回）；与服务端读到的不一致时返回 409
+             */
+            expected_updated_at?: string | null;
         };
         /**
          * UserRole

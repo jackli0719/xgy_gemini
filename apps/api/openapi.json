@@ -2107,7 +2107,7 @@
           "platform-catalog"
         ],
         "summary": "改品类（名称 / 排序 / 状态）",
-        "description": "把品类改成指定的样子。\n\n状态被别人改过（expected_status 对不上）-> 409。\n品类不存在 -> 404。",
+        "description": "把品类改成指定的样子。\n\n这一行被别人改过（expected_status / expected_updated_at 对不上）-> 409。\n品类不存在 -> 404。",
         "operationId": "update_platform_category_api_v1_platform_categories__category_id__patch",
         "parameters": [
           {
@@ -2239,7 +2239,7 @@
           "platform-catalog"
         ],
         "summary": "改服务项（名称 / 基准价 / 时长 / 状态）",
-        "description": "把服务项改成指定的样子。\n\n**改价会留痕**：base_price 的 old / new 值都写进 audit_log（R3）。\n状态被别人改过（expected_status 对不上）-> 409。\n服务项不存在 -> 404。",
+        "description": "把服务项改成指定的样子。\n\n**改价会留痕**：base_price 的 old / new 值都写进 audit_log（R3），\nnew 值取自库里落下的值（``UPDATE ... RETURNING``）。\n这一行被别人改过（expected_status / expected_updated_at 对不上）-> 409。\n服务项不存在 -> 404。",
         "operationId": "update_platform_item_api_v1_platform_items__item_id__patch",
         "parameters": [
           {
@@ -2722,7 +2722,7 @@
               }
             ],
             "title": "Base Price",
-            "description": "基准价"
+            "description": "基准价（最多 12 位、2 位小数）"
           },
           "duration_min": {
             "type": "integer",
@@ -3527,6 +3527,12 @@
             "$ref": "#/components/schemas/CatalogStatus",
             "description": "品类状态"
           },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "最后修改时间（乐观锁的版本号，改的时候原样带回）"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/PlatformServiceItem"
@@ -3552,6 +3558,7 @@
           "parent_id",
           "sort_order",
           "status",
+          "updated_at",
           "items",
           "children"
         ],
@@ -3834,6 +3841,12 @@
             "format": "date-time",
             "title": "Created At",
             "description": "建档时间"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "最后修改时间（乐观锁的版本号，改的时候原样带回）"
           }
         },
         "additionalProperties": false,
@@ -3845,7 +3858,8 @@
           "base_price",
           "duration_min",
           "status",
-          "created_at"
+          "created_at",
+          "updated_at"
         ],
         "title": "PlatformServiceItem",
         "description": "平台侧看到的一条服务项。"
@@ -4346,6 +4360,19 @@
               }
             ],
             "description": "调用方以为的旧状态；与服务端读到的不一致时返回 409"
+          },
+          "expected_updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Updated At",
+            "description": "调用方以为的版本号（这一行最后被改的时间，从列表接口原样带回）；与服务端读到的不一致时返回 409"
           }
         },
         "additionalProperties": false,
@@ -4413,7 +4440,7 @@
               }
             ],
             "title": "Base Price",
-            "description": "基准价"
+            "description": "基准价（最多 12 位、2 位小数）"
           },
           "duration_min": {
             "anyOf": [
@@ -4450,6 +4477,19 @@
               }
             ],
             "description": "调用方以为的旧状态；与服务端读到的不一致时返回 409"
+          },
+          "expected_updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Updated At",
+            "description": "调用方以为的版本号（这一行最后被改的时间，从列表接口原样带回）；与服务端读到的不一致时返回 409"
           }
         },
         "additionalProperties": false,

@@ -7,9 +7,11 @@
   3. 新建 / 编辑品类（名称、排序、状态）；
   4. 新建 / 编辑服务项（名称、基准价、时长、状态）。
 
-  **改的时候带 expected_status**：那是「我以为的旧状态」，服务端发现
-  实际状态已经变了就返回 409（两个人同时改一个服务项，谁先改谁赢，
-  后改的那个拿到冲突而不是把前一个的改动覆盖掉）。
+  **改的时候带 expected_status 与 expected_updated_at**：前者是「我以为的
+  旧状态」，后者是「我以为的版本号」（这一行最后被改的时间，
+  从列表接口原样带回）。服务端发现这一行已经被别人动过就返回 409
+  （两个人同时改一个服务项，谁先改谁赢，后改的那个拿到冲突而不是把
+  前一个的改动覆盖掉）。
 
   身份问题：这一页只有平台侧角色能进（路由守卫按角色拦），
   但**操作人身份不是前端传的**——服务端从 token 里取 role 与 user_id
@@ -138,6 +140,8 @@ const categoryForm = reactive({
 });
 /** 编辑时记住原状态：提交时当 expected_status 带上（乐观锁）。 */
 const categoryOriginalStatus = ref<CatalogStatus>("ACTIVE");
+/** 编辑时记住原版本号：提交时当 expected_updated_at 带上（乐观锁）。 */
+const categoryOriginalUpdatedAt = ref<string | null>(null);
 const editingCategoryId = ref<number | null>(null);
 
 function openCreateCategory(): void {
@@ -147,6 +151,7 @@ function openCreateCategory(): void {
   categoryForm.sort_order = 0;
   categoryForm.status = "ACTIVE";
   categoryOriginalStatus.value = "ACTIVE";
+  categoryOriginalUpdatedAt.value = null;
   categoryVisible.value = true;
 }
 
@@ -162,6 +167,7 @@ function openEditCategory(): void {
   categoryForm.sort_order = node.sort_order;
   categoryForm.status = node.status;
   categoryOriginalStatus.value = node.status;
+  categoryOriginalUpdatedAt.value = node.updated_at;
   categoryVisible.value = true;
 }
 
@@ -187,6 +193,8 @@ async function submitCategory(): Promise<void> {
           sort_order: categoryForm.sort_order,
           status: categoryForm.status,
           expected_status: categoryOriginalStatus.value,
+          // 版本号：原样带回，服务端发现这行被改过就返回 409
+          expected_updated_at: categoryOriginalUpdatedAt.value,
         },
       );
       ElMessage.success("已保存");
@@ -214,6 +222,8 @@ const itemForm = reactive({
 });
 /** 编辑时记住原状态：提交时当 expected_status 带上（乐观锁）。 */
 const itemOriginalStatus = ref<CatalogStatus>("ACTIVE");
+/** 编辑时记住原版本号：提交时当 expected_updated_at 带上（乐观锁）。 */
+const itemOriginalUpdatedAt = ref<string | null>(null);
 const editingItemId = ref<number | null>(null);
 
 function openCreateItem(): void {
@@ -227,6 +237,7 @@ function openCreateItem(): void {
   itemForm.duration_min = 60;
   itemForm.status = "ACTIVE";
   itemOriginalStatus.value = "ACTIVE";
+  itemOriginalUpdatedAt.value = null;
   itemVisible.value = true;
 }
 
@@ -237,6 +248,7 @@ function openEditItem(row: ServiceItem): void {
   itemForm.duration_min = row.duration_min;
   itemForm.status = row.status;
   itemOriginalStatus.value = row.status;
+  itemOriginalUpdatedAt.value = row.updated_at;
   itemVisible.value = true;
 }
 
@@ -269,6 +281,8 @@ async function submitItem(): Promise<void> {
           duration_min: itemForm.duration_min,
           status: itemForm.status,
           expected_status: itemOriginalStatus.value,
+          // 版本号：原样带回，服务端发现这行被改过就返回 409
+          expected_updated_at: itemOriginalUpdatedAt.value,
         },
       );
       ElMessage.success("已保存");

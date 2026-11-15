@@ -60,3 +60,20 @@ make web-typecheck                # 类型检查（vue-tsc）
 3. **HTTP 只走 `@oto/shared` 的 SDK**：不手写 fetch。类型从
    `apps/api/openapi.json` 生成（`make openapi && npm run generate:api -w @oto/shared`），
    后端加了接口忘了重新导出，契约检查测试会先红。
+
+## 改品类 / 改服务项的两个乐观锁字段
+
+`PATCH /api/v1/platform/categories/{id}` 与 `/items/{id}` 带两个字段：
+
+| 字段 | 是什么 | 不传会怎样 |
+| --- | --- | --- |
+| `expected_status` | 我以为的旧状态 | 用服务端刚读到的旧状态 |
+| `expected_updated_at` | 我以为的**版本号**（这一行最后被改的时间，从列表接口原样带回） | 用服务端刚读到的版本号 |
+
+服务端用**条件 UPDATE**（`WHERE id = ? AND status = ? AND 版本号 = ?`）判定，
+一行都没改到就返回 409。**为什么两个都要**：状态没变但价格被别人改了，
+只判状态是发现不了的——两个人的页面都显示「启用」，第二个人的改价会把
+第一个人的改价无声地盖掉。版本号管的是「这一行有没有被别人动过」。
+
+版本号取**毫秒**精度：前端经过 JS 的 `Date` 只会剩下毫秒，
+定得更细就会出现「明明没冲突却报 409」。

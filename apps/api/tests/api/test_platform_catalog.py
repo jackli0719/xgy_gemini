@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import httpx
@@ -37,6 +38,15 @@ CATEGORIES_URL = "/api/v1/platform/categories"
 ITEMS_URL = "/api/v1/platform/items"
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+
+# 种子数据用的固定版本号（updated_at）。
+#
+# 不用「现在」：版本号的精度是毫秒，如果种子时间与改价时间落在同一
+# 毫秒里，「版本号变了没有」就成了掷骰子——并发测试会时绿时红。
+#
+# 故意带微秒（.123456）：客户端把版本号原样回传时带着微秒，
+# 服务端要能认出来（比较时两边都截到毫秒）。
+OLD_TIMESTAMP = datetime(2024, 1, 1, 0, 0, 0, 123456, tzinfo=timezone.utc)
 
 
 def _auth_header(user_id: int, role: UserRole, provider_id: int | None) -> dict[str, str]:
@@ -120,7 +130,11 @@ async def _seed(db) -> dict[str, int]:
         await session.flush()
 
         parent = ServiceCategory(
-            name="家庭保洁", parent_id=None, sort_order=1, status=CatalogStatus.ACTIVE
+            name="家庭保洁",
+            parent_id=None,
+            sort_order=1,
+            status=CatalogStatus.ACTIVE,
+            updated_at=OLD_TIMESTAMP,
         )
         session.add(parent)
         await session.flush()
@@ -130,6 +144,7 @@ async def _seed(db) -> dict[str, int]:
             parent_id=parent.id,
             sort_order=2,
             status=CatalogStatus.ACTIVE,
+            updated_at=OLD_TIMESTAMP,
         )
         # 一个已停用的品类：平台侧要看得见停用的东西
         disabled = ServiceCategory(
@@ -137,6 +152,7 @@ async def _seed(db) -> dict[str, int]:
             parent_id=None,
             sort_order=9,
             status=CatalogStatus.INACTIVE,
+            updated_at=OLD_TIMESTAMP,
         )
         session.add_all([child, disabled])
         await session.flush()
@@ -147,6 +163,7 @@ async def _seed(db) -> dict[str, int]:
             base_price=Decimal("100.00"),
             duration_min=60,
             status=CatalogStatus.ACTIVE,
+            updated_at=OLD_TIMESTAMP,
         )
         session.add(item)
         await session.flush()
@@ -606,3 +623,345 @@ async def test_update_item_rejects_negative_price(api_client, seeded) -> None:
         headers=headers,
     )
     assert response.status_code == 422
+
+
+# =====================================================================
+# 版本锁（乐观锁）：expected_updated_at
+# =====================================================================
+
+
+async def _item_version(api_client, headers) -> str:
+    """从品类树里拿服务项当前的版本号（updated_at）。"""
+    response = await api_client.get(CATEGORIES_URL, headers=headers)
+    assert response.status_code == 200
+    parent = next(node for node in response.json() if node["name"] == "家庭保洁")
+    return parent["items"][0]["updated_at"]
+
+
+async def _category_version(api_client, headers) -> str:
+    """从品类树里拿品类当前的版本号（updated_at）。"""
+    response = await api_client.get(CATEGORIES_URL, headers=headers)
+    assert response.status_code == 200
+    parent = next(node for node in response.json() if node["name"] == "家庭保洁")
+    return parent["updated_at"]
+
+
+@pytest.mark.integration
+async def test_list_categories_exposes_version_token(api_client, seeded) -> None:
+    """列表接口要带上版本号（updated_at）：客户端改的时候原样带回。"""
+    headers = _platform_headers(seeded)
+    response = await api_client.get(CATEGORIES_URL, headers=headers)
+    assert response.status_code == 200
+    parent = next(node for node in response.json() if node["name"] == "家庭保洁")
+    assert parent["updated_at"]
+    assert parent["items"][0]["updated_at"]
+
+
+@pytest.mark.integration
+async def test_concurrent_price_change_one_wins_one_conflicts(
+    api_client, seeded, db
+) -> None:
+    """两个运营同时改同一个服务项的价格：成功 1 个，冲突 1 个（409）。
+
+    **审计的 old_value 必须是真正被覆盖掉的那个值**（100.00），
+    而不是后改的那个运营以为的值——否则 R3 追出来的价格链路是错的。
+    """
+    admin_headers = _platform_headers(seeded)
+    ops_headers = _auth_header(seeded["platform_ops"], UserRole.PLATFORM_OPS, None)
+
+    # 两个运营读到的是**同一个版本**
+    version = await _item_version(api_client, admin_headers)
+    assert Decimal(
+        next(
+            node
+            for node in (await api_client.get(CATEGORIES_URL, headers=admin_headers)).json()
+            if node["name"] == "家庭保洁"
+        )["items"][0]["base_price"]
+    ) == Decimal("100.00")
+
+    # 甲先改：成功
+    first = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={"base_price": "150.00", "expected_updated_at": version},
+        headers=admin_headers,
+    )
+    assert first.status_code == 200
+    assert Decimal(first.json()["base_price"]) == Decimal("150.00")
+
+    # 乙拿着同一个（已经过期的）版本号改：409
+    second = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={"base_price": "200.00", "expected_updated_at": version},
+        headers=ops_headers,
+    )
+    assert second.status_code == 409
+
+    # 库里是甲的价，乙没盖上去
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(ServiceItem).where(ServiceItem.id == seeded["item"])
+            )
+        ).scalar_one()
+        assert item.base_price == Decimal("150.00")
+
+    # 审计只有甲那一条：old 是真正被覆盖的值，new 是落库的值
+    logs = await _audit_logs(db, "service_item", seeded["item"])
+    price_logs = [log for log in logs if log.field_name == "base_price"]
+    assert len(price_logs) == 1
+    assert price_logs[0].old_value == "100.00"
+    assert price_logs[0].new_value == "150.00"
+    assert price_logs[0].operator_id == seeded["platform_admin"]
+
+
+@pytest.mark.integration
+async def test_stale_expected_updated_at_returns_409(api_client, seeded, db) -> None:
+    """版本号对不上 -> 409，而且价一个字节都没变、也不留痕。"""
+    headers = _platform_headers(seeded)
+    response = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={
+            "base_price": "999.00",
+            # 比种子数据还早的版本号：一定是过期的
+            "expected_updated_at": "2023-06-01T00:00:00Z",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 409
+
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(ServiceItem).where(ServiceItem.id == seeded["item"])
+            )
+        ).scalar_one()
+        assert item.base_price == Decimal("100.00")
+    assert await _audit_logs(db, "service_item", seeded["item"]) == []
+
+
+@pytest.mark.integration
+async def test_update_item_with_matching_version_succeeds(
+    api_client, seeded, db
+) -> None:
+    """版本号对得上 -> 改成功，并且版本号往前走。"""
+    headers = _platform_headers(seeded)
+    version = await _item_version(api_client, headers)
+    response = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={"base_price": "150.00", "expected_updated_at": version},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["updated_at"] != version
+
+    logs = await _audit_logs(db, "service_item", seeded["item"])
+    price_logs = [log for log in logs if log.field_name == "base_price"]
+    assert len(price_logs) == 1
+    assert price_logs[0].old_value == "100.00"
+    assert price_logs[0].new_value == "150.00"
+
+
+@pytest.mark.integration
+async def test_update_item_without_version_token_still_succeeds(
+    api_client, seeded
+) -> None:
+    """不传版本号也能改（老客户端不传这个字段）：只是没有版本锁而已。"""
+    headers = _platform_headers(seeded)
+    response = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={"base_price": "150.00"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert Decimal(response.json()["base_price"]) == Decimal("150.00")
+
+
+@pytest.mark.integration
+async def test_update_item_accepts_version_echoed_with_microseconds(
+    api_client, seeded
+) -> None:
+    """客户端把版本号**原样回传**（带微秒）也得能改成功。
+
+    版本号的比较精度是毫秒（前端经过 JS 的 Date 只会剩毫秒），
+    所以带微秒的值要能被认出来——不然原样回传的客户端会一直撞 409。
+    """
+    headers = _platform_headers(seeded)
+    version = await _item_version(api_client, headers)
+    # 种子的版本号带微秒：这一步真的在测「截到毫秒」
+    assert version.startswith("2024-01-01T00:00:00.123456")
+
+    response = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={"base_price": "150.00", "expected_updated_at": version},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert Decimal(response.json()["base_price"]) == Decimal("150.00")
+
+
+@pytest.mark.integration
+async def test_update_category_with_stale_version_returns_409(
+    api_client, seeded, db
+) -> None:
+    """品类同理：版本号对不上 -> 409，名字没变、也不留痕。"""
+    headers = _platform_headers(seeded)
+    version = await _category_version(api_client, headers)
+    response = await api_client.patch(
+        "{}/{}".format(CATEGORIES_URL, seeded["parent"]),
+        json={
+            "name": "被别人改过",
+            # 比种子数据还早的版本号：一定是过期的
+            "expected_updated_at": "2023-06-01T00:00:00Z",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert version  # 版本号读得到
+
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as session:
+        category = (
+            await session.execute(
+                select(ServiceCategory).where(ServiceCategory.id == seeded["parent"])
+            )
+        ).scalar_one()
+        assert category.name == "家庭保洁"
+    assert await _audit_logs(db, "service_category", seeded["parent"]) == []
+
+
+@pytest.mark.integration
+async def test_update_category_with_matching_version_succeeds(
+    api_client, seeded
+) -> None:
+    """品类带上对的版本号 -> 改成功。"""
+    headers = _platform_headers(seeded)
+    version = await _category_version(api_client, headers)
+    response = await api_client.patch(
+        "{}/{}".format(CATEGORIES_URL, seeded["parent"]),
+        json={"name": "家庭保洁新名", "expected_updated_at": version},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "家庭保洁新名"
+    assert response.json()["updated_at"] != version
+
+
+@pytest.mark.integration
+async def test_update_category_without_version_token_still_succeeds(
+    api_client, seeded
+) -> None:
+    """品类不传版本号也能改（向后兼容）。"""
+    headers = _platform_headers(seeded)
+    response = await api_client.patch(
+        "{}/{}".format(CATEGORIES_URL, seeded["parent"]),
+        json={"name": "家庭保洁新名"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["name"] == "家庭保洁新名"
+
+
+# =====================================================================
+# 价格精度
+# =====================================================================
+
+
+@pytest.mark.integration
+async def test_create_item_rejects_more_than_two_decimals(
+    api_client, seeded
+) -> None:
+    """1.005 -> 422（价格最多两位小数，库里是 Numeric(12, 2)）。"""
+    headers = _platform_headers(seeded)
+    response = await api_client.post(
+        ITEMS_URL,
+        json={
+            "category_id": seeded["parent"],
+            "name": "精度不对的服务项",
+            "base_price": "1.005",
+            "duration_min": 30,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.integration
+async def test_update_item_rejects_more_than_two_decimals(
+    api_client, seeded
+) -> None:
+    """改价 1.005 -> 422。"""
+    headers = _platform_headers(seeded)
+    response = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={"base_price": "1.005"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.integration
+async def test_create_item_rejects_price_over_12_digits(
+    api_client, seeded
+) -> None:
+    """10^13 -> 422（Numeric(12, 2) 装不下，接口层先挡住）。"""
+    headers = _platform_headers(seeded)
+    response = await api_client.post(
+        ITEMS_URL,
+        json={
+            "category_id": seeded["parent"],
+            "name": "天价服务项",
+            "base_price": "10000000000000",
+            "duration_min": 30,
+        },
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.integration
+async def test_update_item_rejects_price_over_12_digits(
+    api_client, seeded
+) -> None:
+    """改价 10^13 -> 422。"""
+    headers = _platform_headers(seeded)
+    response = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={"base_price": "10000000000000"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.integration
+async def test_update_item_audit_new_value_is_stored_value(
+    api_client, seeded, db
+) -> None:
+    """审计的 new_value 用**库里落下的值**，不是请求里的值。
+
+    请求写 "150.5"，Numeric(12, 2) 落库是 150.50——审计要写 150.50。
+    """
+    headers = _platform_headers(seeded)
+    response = await api_client.patch(
+        "{}/{}".format(ITEMS_URL, seeded["item"]),
+        json={"base_price": "150.5"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert Decimal(response.json()["base_price"]) == Decimal("150.50")
+
+    logs = await _audit_logs(db, "service_item", seeded["item"])
+    price_logs = [log for log in logs if log.field_name == "base_price"]
+    assert len(price_logs) == 1
+    assert price_logs[0].old_value == "100.00"
+    assert price_logs[0].new_value == "150.50"
+
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as session:
+        item = (
+            await session.execute(
+                select(ServiceItem).where(ServiceItem.id == seeded["item"])
+            )
+        ).scalar_one()
+        assert item.base_price == Decimal("150.50")

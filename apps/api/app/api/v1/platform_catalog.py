@@ -15,9 +15,9 @@
 审计日志里的操作人由 service 从 ``CurrentUser`` 填。
 请求体里出现 operator 之类字段会被 schema 直接 422。
 
-**改的时候带 expected_status**：条件 UPDATE 的谓词是
-``WHERE id = ? AND status = 期望旧状态``，别人先改了就返回 409
-（见 app.services.platform_catalog.update_category）。
+**改的时候带 expected_status / expected_updated_at**：条件 UPDATE 的谓词是
+``WHERE id = ? AND status = 期望旧状态 AND 版本号 = 期望版本号``，
+别人先改了就返回 409（见 app.services.platform_catalog.update_category）。
 """
 from __future__ import annotations
 
@@ -54,6 +54,7 @@ def _to_category_node(category: platform_catalog.PlatformCategory) -> PlatformCa
         parent_id=category.parent_id,
         sort_order=category.sort_order,
         status=category.status,
+        updated_at=category.updated_at,
         items=[_to_service_item(item) for item in category.items],
         children=[_to_category_node(child) for child in category.children],
     )
@@ -69,6 +70,7 @@ def _to_service_item(item: platform_catalog.PlatformServiceItem) -> PlatformServ
         duration_min=item.duration_min,
         status=item.status,
         created_at=item.created_at,
+        updated_at=item.updated_at,
     )
 
 
@@ -128,7 +130,7 @@ async def update_platform_category(
 ) -> PlatformCategoryNode:
     """把品类改成指定的样子。
 
-    状态被别人改过（expected_status 对不上）-> 409。
+    这一行被别人改过（expected_status / expected_updated_at 对不上）-> 409。
     品类不存在 -> 404。
     """
     category = await platform_catalog.update_category(
@@ -138,6 +140,7 @@ async def update_platform_category(
         sort_order=payload.sort_order,
         status=payload.status,
         expected_status=payload.expected_status,
+        expected_updated_at=payload.expected_updated_at,
         current_user=current_user,
     )
     return _to_category_node(category)
@@ -182,8 +185,9 @@ async def update_platform_item(
 ) -> PlatformServiceItem:
     """把服务项改成指定的样子。
 
-    **改价会留痕**：base_price 的 old / new 值都写进 audit_log（R3）。
-    状态被别人改过（expected_status 对不上）-> 409。
+    **改价会留痕**：base_price 的 old / new 值都写进 audit_log（R3），
+    new 值取自库里落下的值（``UPDATE ... RETURNING``）。
+    这一行被别人改过（expected_status / expected_updated_at 对不上）-> 409。
     服务项不存在 -> 404。
     """
     item = await platform_catalog.update_service_item(
@@ -194,6 +198,7 @@ async def update_platform_item(
         duration_min=payload.duration_min,
         status=payload.status,
         expected_status=payload.expected_status,
+        expected_updated_at=payload.expected_updated_at,
         current_user=current_user,
     )
     return _to_service_item(item)

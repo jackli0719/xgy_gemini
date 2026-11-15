@@ -8,10 +8,19 @@
 **身份只从 token 来**：这些接口的请求体里没有 operator 之类字段，
 平台侧的身份与归属由服务端从 ``CurrentUser`` 取（R1）。
 
-**改类 / 改服务项带 ``expected_status``**：条件 UPDATE 的谓词是
-``WHERE id = ? AND status = 期望旧状态``，客户端把「我以为的旧状态」
-一并带上来，服务端据此判断有没有被别人改过（乐观锁）。
-不传就用服务端刚读到的旧状态——于是「读之后、写之前被别人改了」
+**改类 / 改服务项带两个乐观锁字段**：
+
+- ``expected_status``：条件 UPDATE 的谓词之一
+  （``WHERE id = ? AND status = 期望旧状态``）；
+- ``expected_updated_at``：**版本号**（这一行最后被改的时间），
+  谓词是 ``date_trunc('milliseconds', updated_at) = 期望版本号``。
+
+为什么不只靠 ``expected_status``：状态没变、价格被别人改掉了，
+只判状态是发现不了的——两个人都看到「ACTIVE」，第二个人的改价会把
+第一个人的改价无声地盖掉。版本号管的是「这一行有没有被别人动过」，
+与改的是哪个字段无关，品类与服务项用的是同一套。
+
+不传就用服务端刚读到的旧值——于是「读之后、写之前被别人改了」
 这种情况也会被判成冲突（409）。
 """
 from __future__ import annotations
@@ -45,6 +54,10 @@ class PlatformServiceItem(BaseModel):
     duration_min: int = Field(..., description="服务时长（分钟）")
     status: CatalogStatus = Field(..., description="服务项状态")
     created_at: datetime = Field(..., description="建档时间")
+    updated_at: datetime = Field(
+        ...,
+        description="最后修改时间（乐观锁的版本号，改的时候原样带回）",
+    )
 
 
 class PlatformCategoryNode(BaseModel):
@@ -62,6 +75,10 @@ class PlatformCategoryNode(BaseModel):
     parent_id: int | None = Field(..., description="父品类 ID；一级品类为空")
     sort_order: int = Field(..., description="排序值（小的排前面）")
     status: CatalogStatus = Field(..., description="品类状态")
+    updated_at: datetime = Field(
+        ...,
+        description="最后修改时间（乐观锁的版本号，改的时候原样带回）",
+    )
     items: list[PlatformServiceItem] = Field(
         ...,
         description="直接归属本品类的服务项（含已停用）",
@@ -106,6 +123,13 @@ class UpdateCategoryRequest(BaseModel):
         None,
         description="调用方以为的旧状态；与服务端读到的不一致时返回 409",
     )
+    expected_updated_at: datetime | None = Field(
+        None,
+        description=(
+            "调用方以为的版本号（这一行最后被改的时间，"
+            "从列表接口原样带回）；与服务端读到的不一致时返回 409"
+        ),
+    )
 
     @model_validator(mode="after")
     def _require_at_least_one_change(self) -> "UpdateCategoryRequest":
@@ -129,7 +153,13 @@ class CreateServiceItemRequest(BaseModel):
 
     category_id: int = Field(..., gt=0, description="归属的品类 ID")
     name: str = Field(..., min_length=1, max_length=64, description="服务项名称")
-    base_price: Decimal = Field(..., ge=0, description="基准价")
+    base_price: Decimal = Field(
+        ...,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="基准价（最多 12 位、2 位小数）",
+    )
     duration_min: int = Field(..., gt=0, le=1440, description="服务时长（分钟）")
 
 
@@ -143,12 +173,25 @@ class UpdateServiceItemRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(None, min_length=1, max_length=64, description="服务项名称")
-    base_price: Decimal | None = Field(None, ge=0, description="基准价")
+    base_price: Decimal | None = Field(
+        None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+        description="基准价（最多 12 位、2 位小数）",
+    )
     duration_min: int | None = Field(None, gt=0, le=1440, description="服务时长（分钟）")
     status: CatalogStatus | None = Field(None, description="服务项状态")
     expected_status: CatalogStatus | None = Field(
         None,
         description="调用方以为的旧状态；与服务端读到的不一致时返回 409",
+    )
+    expected_updated_at: datetime | None = Field(
+        None,
+        description=(
+            "调用方以为的版本号（这一行最后被改的时间，"
+            "从列表接口原样带回）；与服务端读到的不一致时返回 409"
+        ),
     )
 
     @model_validator(mode="after")
