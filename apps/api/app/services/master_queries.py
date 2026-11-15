@@ -23,14 +23,17 @@
 
 **列表为什么只有三种状态**：师傅的工作队列只有三组——待接单（PENDING_ACCEPT）、
 已接单待开工（ACCEPTED）、服务中（IN_SERVICE）。
-这个集合是业务规则，落在 ``app.models.enums.MasterOrderStatus``，
-接口层用它做 422，service 也按同一份判断。
+这个集合是业务规则，落在 ``app.models.enums.MasterOrderStatus``（**事实来源**）：
+接口层用窄枚举把别的状态变成 422，service 用同一份定义做**运行时校验**
+（``_resolve_master_order_status``），把不合法的状态挡在碰库之前——
+两道防线共用一份定义，不会各写各的。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
+from enum import Enum
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +45,11 @@ from app.models.enums import MasterOrderStatus, MasterStatus, OrderStatus
 from app.models.order import Order
 from app.models.provider import Master, ServiceProvider
 from app.models.schedule_slot import ScheduleSlot
-from app.services.errors import MasterQueryForbiddenError, OrderNotFoundError
+from app.services.errors import (
+    MasterOrderStatusNotAllowedError,
+    MasterQueryForbiddenError,
+    OrderNotFoundError,
+)
 
 __all__ = [
     "DEFAULT_PAGE_LIMIT",
@@ -68,6 +75,15 @@ _ORDER_NOT_FOUND_DETAIL = "订单不存在：order_no={order_no}"
 # 「这个账号没有师傅身份」的文案。与接单 / 服务流转那边写的是同一句，
 # 免得同一个问题在两个接口里长得不一样。
 _NO_MASTER_IDENTITY_DETAIL = "当前账号没有师傅身份"
+
+# 师傅端可查的订单状态集合（事实来源：app.models.enums.MasterOrderStatus）。
+#
+# 为什么 service 里还要有一份：接口层的窄枚举只在「走 HTTP」时有效，
+# service 也会被直接调用（测试、将来的别的入口），那时类型提示挡不住
+# 运行时传错值——``OrderStatus.COMPLETED`` 照样能传进来。
+# 少了这道校验，一次本该被拒的查询会变成「返回一批比工作队列宽得多的单」。
+# 与 app.services.master_management 的 _SETTABLE_STATUS_VALUES 同一套写法。
+_MASTER_ORDER_STATUS_VALUES = frozenset(s.value for s in MasterOrderStatus)
 
 
 @dataclass(frozen=True)
@@ -161,24 +177,28 @@ async def list_master_orders(
     session: AsyncSession,
     *,
     master_id: int,
-    status: MasterOrderStatus,
+    status: MasterOrderStatus | OrderStatus | str,
     limit: int = DEFAULT_PAGE_LIMIT,
     offset: int = 0,
 ) -> tuple[list[MasterOrderRow], int]:
     """返回派给我、且处于指定状态的订单（按创建时间倒序）与总数。
 
-    ``status`` 只允许 MasterOrderStatus 里的三种（业务规则），
-    接口层已经用窄枚举把别的状态挡成 422，这里再挡一次：
-    有人绕过接口层直接调 service 时，别的状态不该被当成一个合法查询。
+    ``status`` 只允许 MasterOrderStatus 里的三种（业务规则）。
+    接口层用窄枚举把别的状态挡成 422，这里**再挡一次**（运行时校验，
+    见 ``_resolve_master_order_status``）：有人绕过接口层直接调 service 时，
+    别的状态不该被当成一次合法查询。
 
     归属谓词 ``Order.master_id == master_id`` 是这个接口的**唯一**闸门：
     别人的单既不在列表里，详情里也查不到（404 同构）。
     """
+    # 状态校验放在碰库之前：不合法的状态连数据都不该看一眼
+    resolved_status = _resolve_master_order_status(status)
+
     effective_limit = min(max(limit, 1), MAX_PAGE_LIMIT)
     effective_offset = max(offset, 0)
     scope = and_(
         Order.master_id == master_id,
-        Order.status == OrderStatus(status.value),
+        Order.status == OrderStatus(resolved_status.value),
     )
 
     total = (
@@ -244,6 +264,35 @@ async def get_master_profile(
     if row is None:
         raise MasterQueryForbiddenError(_NO_MASTER_IDENTITY_DETAIL)
     return MasterProfileRow(*row)
+
+
+def _resolve_master_order_status(
+    status: MasterOrderStatus | OrderStatus | str,
+) -> MasterOrderStatus:
+    """把传入的状态收敛成「师傅端可查」的 ``MasterOrderStatus``。
+
+    **为什么要在这里再挡一次**：接口层用窄枚举（``MasterOrderStatus``）
+    把别的状态变成 422，但那条防线只在「走接口」时有效。service 也会被
+    直接调用（测试、将来的别的入口），那时类型提示挡不住运行时传错值——
+    ``OrderStatus.COMPLETED`` 照样能传进来。
+
+    所以这里按同一份事实来源（``app.models.enums.MasterOrderStatus``）
+    显式校验一遍：不在可查集合里就抛业务异常，而不是照单全收——
+    一次本该被拒的查询，会变成「返回一批比工作队列宽得多的单」
+    （师傅会看到自己已完成的单）。
+
+    非法状态映射成 400（``MasterOrderStatusNotAllowedError``）：
+    客户端改了请求内容才可能解决，不是 404、也不是 500。
+    """
+    value = status.value if isinstance(status, Enum) else str(status)
+    if value not in _MASTER_ORDER_STATUS_VALUES:
+        raise MasterOrderStatusNotAllowedError(
+            "师傅端只支持这三种状态：{}，收到：{}".format(
+                " / ".join(sorted(_MASTER_ORDER_STATUS_VALUES)),
+                value,
+            )
+        )
+    return MasterOrderStatus(value)
 
 
 def _order_select():

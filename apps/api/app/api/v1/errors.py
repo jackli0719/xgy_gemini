@@ -36,6 +36,7 @@ from app.services.errors import (
     MasterActionInvariantError,
     MasterNotDispatchableError,
     MasterNotFoundError,
+    MasterOrderStatusNotAllowedError,
     MasterQueryError,
     MasterQueryForbiddenError,
     MasterStatusNotSettableError,
@@ -110,6 +111,9 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     MasterActionInvariantError: 500,
     # 师傅端查询：角色不对 / 没有师傅身份 / 身份与服务商归属不一致
     MasterQueryForbiddenError: 403,
+    # 师傅端查询：状态不在「三种工作分组」里
+    # 客户端改了请求内容才可能解决 -> 400
+    MasterOrderStatusNotAllowedError: 400,
     # 服务流转：角色不对 / 没有师傅身份 / 身份与服务商归属不一致
     ServiceFlowForbiddenError: 403,
     # 服务流转：内部一致性被打破（服务端 bug，不是客户端的问题）

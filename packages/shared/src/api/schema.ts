@@ -964,9 +964,12 @@ export interface components {
          *     这是**业务规则**，不是「接口长什么样」：师傅的工作队列只有三组——
          *     待接单（PENDING_ACCEPT）、已接单待开工（ACCEPTED）、服务中（IN_SERVICE）。
          *
-         *     放在这里（而不是 schema 层）是因为 service 也要按同一份判断：
-         *     接口层用窄枚举把别的状态挡成 422，service 这边再挡一次，
-         *     免得有人绕过接口层直接调 service（类型提示挡不住运行时传错值）。
+         *     放在这里（而不是 schema 层）是因为它是**业务规则**，service 也要按
+         *     同一份判断：接口层用窄枚举把别的状态变成 422，service 这边用同一份
+         *     定义做**运行时校验**（见 app.services.master_queries.
+         *     _resolve_master_order_status），把不合法的状态挡在碰库之前——
+         *     类型提示挡不住运行时传错值，有人绕过接口层直接调 service 时
+         *     照样能传进别的枚举值。
          *
          *     与 ``OrderStatus`` 的取值同名但不是同一个类型：订单状态机有 12 态，
          *     师傅端只关心其中三个。

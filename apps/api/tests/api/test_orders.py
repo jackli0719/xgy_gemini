@@ -55,6 +55,7 @@ from app.services.errors import (
     MasterActionInvariantError,
     MasterNotDispatchableError,
     MasterNotFoundError,
+    MasterOrderStatusNotAllowedError,
     MasterQueryError,
     MasterQueryForbiddenError,
     MasterStatusNotSettableError,
@@ -190,6 +191,8 @@ def test_exception_status_map_contents() -> None:
         MasterActionInvariantError: 500,
         # 师傅端查询（我的订单 / 我的资料）
         MasterQueryForbiddenError: 403,
+        # 师傅端查询：状态不在「三种工作分组」里
+        MasterOrderStatusNotAllowedError: 400,
         # 服务流转（开工 / 完工 / 确认完成）
         ServiceFlowForbiddenError: 403,
         ServiceFlowInvariantError: 500,

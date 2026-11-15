@@ -23,6 +23,7 @@ __all__ = [
     "MasterActionInvariantError",
     "MasterNotDispatchableError",
     "MasterNotFoundError",
+    "MasterOrderStatusNotAllowedError",
     "MasterQueryError",
     "MasterQueryForbiddenError",
     "MasterStatusNotSettableError",
@@ -188,6 +189,23 @@ class MasterQueryError(Exception):
     ServiceFlowError / SettlementError / CatalogError）平级：
     师傅端查询是独立的一条链路，共用一个基类会让别的链路的兜底文案
     套到它头上。
+    """
+
+
+class MasterOrderStatusNotAllowedError(MasterQueryError):
+    """师傅端只支持三种订单状态。
+
+    业务规则：师傅的工作队列只有三组——待接单（PENDING_ACCEPT）、
+    已接单待开工（ACCEPTED）、服务中（IN_SERVICE）
+    （见 ``app.models.enums.MasterOrderStatus``）。
+
+    接口层用窄枚举挡过一次（别的状态 -> 422），service 这边再挡一次：
+    类型提示挡不住运行时传错值——有人绕过接口层直接调 service 时，
+    ``OrderStatus.COMPLETED`` 照样能传进来，而它**不该**是一次合法查询
+    （否则师傅会拿到一批比「工作队列」宽得多的单）。
+
+    与 ``MasterStatusNotSettableError`` 同一类错误：客户端改了请求内容
+    才可能解决 -> 400，不是 404、也不是 500。
     """
 
 
