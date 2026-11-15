@@ -50,19 +50,27 @@ TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 MY_PROVIDER_ID = 1
 MY_MASTER_ID = 1  # 本商师傅
+DISABLED_MASTER_ID = 2  # 本商师傅，但已停用（不让他干活）
+ON_LEAVE_MASTER_ID = 3  # 本商师傅，在休假（同样不让他干活）
 
 CUSTOMER_USER_ID = 1  # 客户（订单的主人）
 MY_MASTER_USER_ID = 2  # 师傅账号（master 表里有身份）
+DISABLED_MASTER_USER_ID = 3  # 已停用的师傅账号
+ON_LEAVE_MASTER_USER_ID = 4  # 休假的师傅账号
 
 ACCEPTED_ORDER_ID = 1  # 已接单 -> 可以开工
 IN_SERVICE_ORDER_ID = 2  # 服务中 -> 可以完工
 PENDING_CONFIRM_ORDER_ID = 3  # 待确认 -> 可以确认完成
+DISABLED_MASTER_ORDER_ID = 4  # 派给已停用师傅的已接单单
+ON_LEAVE_MASTER_ORDER_ID = 5  # 派给休假师傅的服务中订单
 
 BASE_PRICE = Decimal("100.00")
 
 ACCEPTED_ORDER_NO = "OTO20260301000001"
 IN_SERVICE_ORDER_NO = "OTO20260301000002"
 PENDING_CONFIRM_ORDER_NO = "OTO20260301000003"
+DISABLED_MASTER_ORDER_NO = "OTO20260301000004"
+ON_LEAVE_MASTER_ORDER_NO = "OTO20260301000005"
 MISSING_ORDER_NO = "OTO20260301009999"
 
 
@@ -85,6 +93,16 @@ def _auth_header(user_id: int, role: UserRole, provider_id: int | None) -> dict[
 
 def _my_master_header() -> dict[str, str]:
     return _auth_header(MY_MASTER_USER_ID, UserRole.MASTER, None)
+
+
+def _disabled_master_header() -> dict[str, str]:
+    """已停用的师傅账号。"""
+    return _auth_header(DISABLED_MASTER_USER_ID, UserRole.MASTER, None)
+
+
+def _on_leave_master_header() -> dict[str, str]:
+    """休假的师傅账号。"""
+    return _auth_header(ON_LEAVE_MASTER_USER_ID, UserRole.MASTER, None)
 
 
 def _customer_header() -> dict[str, str]:
@@ -197,6 +215,17 @@ async def seeded(db):
                 # 师傅账号：师傅的归属权威来源是 master 表，
                 # 所以 user.provider_id 必须为空（数据库 CHECK 约束强制）
                 User(id=MY_MASTER_USER_ID, phone="13900000002", role=UserRole.MASTER),
+                # 不在岗的师傅账号（停用 / 休假）
+                User(
+                    id=DISABLED_MASTER_USER_ID,
+                    phone="13900000003",
+                    role=UserRole.MASTER,
+                ),
+                User(
+                    id=ON_LEAVE_MASTER_USER_ID,
+                    phone="13900000004",
+                    role=UserRole.MASTER,
+                ),
             ]
         )
         await session.flush()
@@ -236,14 +265,31 @@ async def seeded(db):
         )
         await session.flush()
 
-        session.add(
-            Master(
-                id=MY_MASTER_ID,
-                provider_id=MY_PROVIDER_ID,
-                user_id=MY_MASTER_USER_ID,
-                real_name="张师傅",
-                status=MasterStatus.ACTIVE,
-            )
+        session.add_all(
+            [
+                Master(
+                    id=MY_MASTER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    user_id=MY_MASTER_USER_ID,
+                    real_name="张师傅",
+                    status=MasterStatus.ACTIVE,
+                ),
+                # 不在岗的师傅：接不了单，也开不了工 / 完不了工
+                Master(
+                    id=DISABLED_MASTER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    user_id=DISABLED_MASTER_USER_ID,
+                    real_name="停用师傅",
+                    status=MasterStatus.DISABLED,
+                ),
+                Master(
+                    id=ON_LEAVE_MASTER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    user_id=ON_LEAVE_MASTER_USER_ID,
+                    real_name="休假师傅",
+                    status=MasterStatus.ON_LEAVE,
+                ),
+            ]
         )
         await session.flush()
 
@@ -284,18 +330,54 @@ async def seeded(db):
                     dispatched_at=now,
                     accepted_at=now,
                 ),
-                # 待确认 -> 可以确认完成
+                # 待确认 -> 可以确认完成。
+                # 承接师傅是**已停用**的：确认权在客户手上，
+                # 师傅在不在岗跟客户能不能确认没关系（见下面那条测试）
                 Order(
                     id=PENDING_CONFIRM_ORDER_ID,
                     order_no=PENDING_CONFIRM_ORDER_NO,
                     user_id=CUSTOMER_USER_ID,
                     provider_id=MY_PROVIDER_ID,
-                    master_id=MY_MASTER_ID,
+                    master_id=DISABLED_MASTER_ID,
                     address_id=3,
                     item_id=2,
                     slot_id=4,
                     amount=BASE_PRICE,
                     status=OrderStatus.PENDING_CONFIRM,
+                    pay_status=PayStatus.PAID,
+                    paid_at=now,
+                    dispatched_at=now,
+                    accepted_at=now,
+                ),
+                # 派给已停用师傅的已接单单：他想开工 -> 409
+                Order(
+                    id=DISABLED_MASTER_ORDER_ID,
+                    order_no=DISABLED_MASTER_ORDER_NO,
+                    user_id=CUSTOMER_USER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    master_id=DISABLED_MASTER_ID,
+                    address_id=3,
+                    item_id=2,
+                    slot_id=4,
+                    amount=BASE_PRICE,
+                    status=OrderStatus.ACCEPTED,
+                    pay_status=PayStatus.PAID,
+                    paid_at=now,
+                    dispatched_at=now,
+                    accepted_at=now,
+                ),
+                # 派给休假师傅的服务中订单：他想完工 -> 409
+                Order(
+                    id=ON_LEAVE_MASTER_ORDER_ID,
+                    order_no=ON_LEAVE_MASTER_ORDER_NO,
+                    user_id=CUSTOMER_USER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    master_id=ON_LEAVE_MASTER_ID,
+                    address_id=3,
+                    item_id=2,
+                    slot_id=4,
+                    amount=BASE_PRICE,
+                    status=OrderStatus.IN_SERVICE,
                     pay_status=PayStatus.PAID,
                     paid_at=now,
                     dispatched_at=now,
@@ -411,6 +493,97 @@ async def test_finish_endpoint_returns_200(api_client, seeded, db) -> None:
     assert logs[0].from_status == OrderStatus.IN_SERVICE
     assert logs[0].to_status == OrderStatus.PENDING_CONFIRM
     assert logs[0].operator_type == OperatorType.MASTER
+
+
+# ---------------------------------------------------------------------
+# 2.5 师傅状态：只有 ACTIVE 能开工 / 完工
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_inactive_master_cannot_start_or_finish(
+    api_client, seeded, db
+) -> None:
+    """不在岗的师傅开工 / 完工 -> 409「师傅当前不可接单」，订单没动。
+
+    与派单（dispatch）、接单（master_action）是同一条规则：服务商把师傅
+    停用之后，他在哪一头都不该再干活。
+    """
+    start = await api_client.post(
+        _start_url(DISABLED_MASTER_ORDER_NO),
+        headers=_disabled_master_header(),
+    )
+    assert start.status_code == 409
+    assert start.json()["detail"] == "师傅当前不可接单：master_id={}".format(
+        DISABLED_MASTER_ID
+    )
+
+    finish = await api_client.post(
+        _finish_url(ON_LEAVE_MASTER_ORDER_NO),
+        headers=_on_leave_master_header(),
+    )
+    assert finish.status_code == 409
+    assert finish.json()["detail"] == "师傅当前不可接单：master_id={}".format(
+        ON_LEAVE_MASTER_ID
+    )
+
+    # 订单一个字节都没动，也没留痕
+    disabled_order = await _order_of(db, DISABLED_MASTER_ORDER_ID)
+    assert disabled_order.status == OrderStatus.ACCEPTED
+    assert await _logs_of(db, DISABLED_MASTER_ORDER_ID) == []
+
+    leave_order = await _order_of(db, ON_LEAVE_MASTER_ORDER_ID)
+    assert leave_order.status == OrderStatus.IN_SERVICE
+    assert await _logs_of(db, ON_LEAVE_MASTER_ORDER_ID) == []
+
+
+@pytest.mark.integration
+async def test_active_master_can_start_and_finish(api_client, seeded, db) -> None:
+    """在岗的师傅开工 / 完工 -> 200。
+
+    与上面那条对着看：同一个接口，区别只在师傅状态。
+    没有这条对照，409 可能来自别的原因（比如订单本身的状态不对）。
+    """
+    start = await api_client.post(
+        _start_url(ACCEPTED_ORDER_NO),
+        headers=_my_master_header(),
+    )
+    assert start.status_code == 200
+    assert start.json()["status"] == OrderStatus.IN_SERVICE.value
+
+    finish = await api_client.post(
+        _finish_url(IN_SERVICE_ORDER_NO),
+        headers=_my_master_header(),
+    )
+    assert finish.status_code == 200
+    assert finish.json()["status"] == OrderStatus.PENDING_CONFIRM.value
+
+    assert (await _order_of(db, ACCEPTED_ORDER_ID)).status == OrderStatus.IN_SERVICE
+    assert (
+        await _order_of(db, IN_SERVICE_ORDER_ID)
+    ).status == OrderStatus.PENDING_CONFIRM
+
+
+@pytest.mark.integration
+async def test_customer_can_confirm_regardless_of_master_status(
+    api_client, seeded, db
+) -> None:
+    """客户确认完成**不查**师傅状态。
+
+    确认权在客户手上，跟师傅在不在岗没关系：师傅被停用之后，
+    客户手上那笔待确认的订单照样能确认（不然这单就卡死了）。
+    """
+    # 这笔单的承接师傅正是已停用的那位
+    assert (await _order_of(db, PENDING_CONFIRM_ORDER_ID)).master_id == (
+        DISABLED_MASTER_ID
+    )
+
+    response = await api_client.post(
+        _confirm_url(PENDING_CONFIRM_ORDER_NO),
+        headers=_customer_header(),
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == OrderStatus.COMPLETED.value
 
 
 # ---------------------------------------------------------------------

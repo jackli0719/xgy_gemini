@@ -6,7 +6,7 @@
 - ``finish_service``    师傅完工：IN_SERVICE    -> PENDING_CONFIRM
 - ``confirm_complete``  客户确认：PENDING_CONFIRM -> COMPLETED
 
-五条硬约束（每一条都有测试盯着）：
+六条硬约束（每一条都有测试盯着）：
 
 1. **身份不从入参取**。
    - start / finish 是师傅侧动作：``my_master_id`` 从 ``current.user_id``
@@ -30,11 +30,12 @@
    operator_type：start / finish 是 MASTER，confirm 是 USER。
 5. **时间字段**：completed_at 在 confirm 时写；表里**没有** started_at 列，
    开工时间用「IN_SERVICE 状态 + 状态流转日志」表达——不为了凑字段去加列。
+6. **只有 ACTIVE 的师傅能开工 / 完工**：停用（DISABLED）、休假（ON_LEAVE）、
+   未审核（PENDING）的师傅一律 409（``MasterNotDispatchableError``）。
+   与派单、接单是同一条规则——服务商把师傅停用之后，他在哪一头都不该再干活。
+   **客户确认不查这个**：确认权在客户手上（USER 角色），跟师傅状态无关。
 
 事务边界：查身份、条件更新、写日志、回读订单在同一事务内，要么全成要么全不成。
-
-**已知不检查的**（与 T-09b 同样的技术债，另开卡片处理）：
-``master.status``（休假 / 停用的师傅目前仍能开工完工）。
 """
 from __future__ import annotations
 
@@ -45,10 +46,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
 from app.domain.order_state import assert_transition
-from app.models.enums import OperatorType, OrderStatus, UserRole
+from app.models.enums import MasterStatus, OperatorType, OrderStatus, UserRole
 from app.models.order import Order, OrderStatusLog
 from app.models.provider import Master
 from app.services.errors import (
+    MasterNotDispatchableError,
     OrderNotFoundError,
     ServiceFlowForbiddenError,
     ServiceFlowInvariantError,
@@ -84,6 +86,9 @@ async def start_service(
 
     async with session.begin():
         master = await _resolve_master(session, current)
+        # 师傅当前能不能干活：只有 ACTIVE 可以（停用 / 休假 / 未审核一律 409）。
+        # 与派单、接单是同一条规则、同一个异常、同一句话。
+        _require_active_master(master)
 
         order_id = await _claim_order(
             session,
@@ -138,6 +143,8 @@ async def finish_service(
 
     async with session.begin():
         master = await _resolve_master(session, current)
+        # 同开工：不在岗的师傅不干活（409）
+        _require_active_master(master)
 
         order_id = await _claim_order(
             session,
@@ -237,6 +244,22 @@ def _require_user_role(current: CurrentUser) -> None:
     """确认完成是客户侧动作，角色不对直接拒。"""
     if current.role is not UserRole.USER:
         raise ServiceFlowForbiddenError("当前角色不能确认订单完成")
+
+
+def _require_active_master(master: Master) -> None:
+    """师傅当前能不能干活：只有 ACTIVE 可以。
+
+    停用（DISABLED）、休假（ON_LEAVE）、未审核（PENDING）的师傅一律 409。
+    与派单（dispatch）、接单（master_action）是同一条业务规则，
+    所以抛的是同一个异常、同一句话——服务商把师傅停用之后，
+    派单那头派不到他，他接不了单，也开不了工。
+
+    **客户确认不查这个**：确认权在客户手上，跟师傅状态无关。
+    """
+    if master.status != MasterStatus.ACTIVE:
+        raise MasterNotDispatchableError(
+            "师傅当前不可接单：master_id={}".format(master.id)
+        )
 
 
 async def _resolve_master(session: AsyncSession, current: CurrentUser) -> Master:
