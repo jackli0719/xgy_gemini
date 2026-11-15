@@ -98,6 +98,35 @@ Repository secrets → New repository secret**。
 「代理抽风」变成一次无声放行。要临时绕过，就按第 1 节临时关掉 required check
 ——那个动作是显式的、会留在设置变更记录里。
 
+## 5.1 审查门禁只审高风险文件（提速）
+
+门禁的**目标**是守住四条不变量：数据隔离（R1）、结算金额留痕（R3）、
+状态机（R4）、权限提升（R5）。为此把整个 PR 的 diff 丢给审查代理既慢又吵——
+前端、测试、文档的改动占了大头，却几乎不可能踩到这四条。
+
+所以门禁**只审高风险文件**：
+
+| 范围 | 路径 |
+| --- | --- |
+| 高风险（**必审**） | `apps/api/alembic/`、`apps/api/app/services/`、`apps/api/app/core/auth.py`、`apps/api/app/api/v1/`、`apps/api/app/models/` |
+| 低风险（**跳过**） | 前端（`apps/web-admin`、`apps/h5-*`、`packages/`）、测试文件、文档（`*.md`）、`openapi.json`、`schema.ts` |
+
+行为上有三条：
+
+1. **prompt 里只有高风险文件的 diff**，审查代理看到的东西小得多；
+2. **这次 PR 没碰任何高风险文件**时，门禁**不调用审查代理**直接通过
+   （日志里会写「本次没有高风险改动」）——省掉一整轮模型调用；
+3. job 的 `timeout-minutes` 是 **5**：跑不完就是 job 红 = 阻断合并
+   （与第 5 节的 fail-closed 同一口径：没审成 ≠ 审过）。
+
+> 已知取舍：`apps/api/app/schemas/`（请求体校验层）目前**不在**高风险白名单里，
+> 改那里的金额/状态校验不会被门禁看到——要补的话改
+> `.github/workflows/ci.yml` 里的 `HIGH_RISK_PATHS` 数组即可（加一行）。
+
+**这不是降低标准，是把标准用在对的地方**：前端与测试由前两个 job 兜住
+（typecheck / test / build 全绿），剩下的人力与机器时间全砸在可能出事故的
+那几类文件上。
+
 ## 6. 一次典型的合并流程
 
 ```bash

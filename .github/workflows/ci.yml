@@ -160,14 +160,17 @@ jobs:
         run: npm run build --workspace @oto/${{ matrix.pkg }}
 
   # ==============================================================
-  # 3. 审查门禁：只审 diff，出现 critical / high 就阻断
+  # 3. 审查门禁：只审高风险文件的 diff，出现 critical / high 就阻断
   # ==============================================================
   review-gate:
     name: 审查门禁（critical / high 阻断）
     # 只在 PR 上跑：push 到 main 的代码已经过 PR 门禁了
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 只审高风险文件（见下面的 HIGH_RISK_PATHS），prompt 很小，
+    # 5 分钟足够跑完。超时按 fail-closed 处理：job 红 = 阻断合并
+    # （见 .github/BRANCH_PROTECTION.md 第 5 节）。
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: write
@@ -178,7 +181,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: 准备审查输入（规则 + diff）
+      - name: 准备审查输入（规则 + 只含高风险文件的 diff）
         id: prep
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -195,18 +198,73 @@ jobs:
           # 展示的那份 diff 的起点
           base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")
           echo "合并基点：$base"
-          git diff --unified=3 "$base" "$HEAD_SHA" > /tmp/pr.diff
+
+          # ---------------------------------------------------------------
+          # 只审高风险文件：审查门禁提速的核心。
+          #
+          # 白名单（高风险）：改这些地方可能动摇数据隔离、结算金额、
+          # 状态机与权限边界——审错一处就是线上事故，所以必审。
+          # 黑名单（低风险）：前端、测试文件、文档、openapi.json、schema.ts
+          # 这些由别的 job / 人工覆盖，审它们只是拖慢门禁。
+          #
+          # 白名单是「目录 + 文件」两类路径混在一起，所以用数组传 pathspec，
+          # 不要写成一段带空格的字符串（那样会被当成单个路径）。
+          # ---------------------------------------------------------------
+          HIGH_RISK_PATHS=(
+            apps/api/alembic
+            apps/api/app/services
+            apps/api/app/core/auth.py
+            apps/api/app/api/v1
+            apps/api/app/models
+          )
+          # 即使落在白名单目录里，这些也要跳过（测试 / 文档 / 生成物）
+          LOW_RISK_RE='(^|/)(tests/.*|test_[^/]*\.py|[^/]*\.(spec|test)\.ts|[^/]*\.md|openapi\.json|schema\.ts)$'
+
+          # 用 while-read 收集（不用 mapfile：那是 bash 4+ 的写法，
+          # 这里保持 bash 3.2 也能跑，本地复现时不用换 shell）
+          high_risk_files=()
+          while IFS= read -r changed_file; do
+            if [ -n "$changed_file" ]; then
+              high_risk_files+=("$changed_file")
+            fi
+          done < <(
+            git diff --name-only "$base" "$HEAD_SHA" -- "${HIGH_RISK_PATHS[@]}" \
+              | grep -Ev "$LOW_RISK_RE" || true
+          )
+
+          echo "本次改动的高风险文件："
+          if [ ${#high_risk_files[@]} -eq 0 ]; then
+            echo "  （无）"
+          else
+            printf '  %s\n' "${high_risk_files[@]}"
+          fi
+
+          if [ ${#high_risk_files[@]} -eq 0 ]; then
+            # 没有高风险文件 = 这次改动碰不到审查要守住的那几条不变量，
+            # 门禁直接放行（不去跑审查代理，省掉一整轮模型调用）。
+            echo "has_high_risk=false" >> "$GITHUB_OUTPUT"
+            echo "没有高风险文件，跳过审查代理。"
+            exit 0
+          fi
+
+          git diff --unified=3 "$base" "$HEAD_SHA" -- "${high_risk_files[@]}" > /tmp/pr_high_risk.diff
           {
             echo "下面是一次 pull request 的改动。请按「审查规则」一节审查。"
             echo "只输出规则里约定格式的 JSON 数组，不要输出别的文字。"
             echo "不要修改文件，不要执行命令。"
             echo
+            echo "## 审查范围"
+            echo "本次**只审下列高风险文件**的改动："
+            printf -- '- %s\n' "${high_risk_files[@]}"
+            echo "范围之外的改动（前端、测试、文档、openapi.json、schema.ts 等）"
+            echo "不在审查范围：它们由别的 job 与人工评审覆盖，不要为它们提问题。"
+            echo
             echo "## 审查规则"
             cat code_review_agent/skills/code-review-and-quality/SKILL.md
             echo
-            echo "## 本次改动的 diff"
+            echo "## 本次改动的 diff（仅高风险文件）"
             echo '```diff'
-            cat /tmp/pr.diff
+            cat /tmp/pr_high_risk.diff
             echo '```'
           } > /tmp/review_prompt.md
           {
@@ -214,9 +272,12 @@ jobs:
             cat /tmp/review_prompt.md
             echo "OTO_REVIEW_PROMPT_EOF"
           } >> "$GITHUB_OUTPUT"
+          echo "has_high_risk=true" >> "$GITHUB_OUTPUT"
 
       - name: 跑审查代理
         id: agy
+        # 没有高风险文件时压根不跑代理（省一整轮模型调用）
+        if: steps.prep.outputs.has_high_risk == 'true'
         # 第三方 action 锁 commit SHA（不用 @main：@main 随时会被改）
         uses: rsamborski/run-agy-sdk@a016fe89e8c0ce9d7d2c2d4e79f94bff6da0b240
         with:
@@ -227,7 +288,13 @@ jobs:
           trust-workspace: "false"
           upload_artifacts: "false"
 
+      - name: 本次没有高风险改动（无需审查）
+        if: steps.prep.outputs.has_high_risk != 'true'
+        run: |
+          echo "本次 PR 没有改动任何高风险文件，审查门禁直接通过（未调用审查代理）。"
+
       - name: 判定（critical / high 就阻断）
+        if: steps.prep.outputs.has_high_risk == 'true'
         env:
           REVIEW_RESPONSE: ${{ steps.agy.outputs.response }}
         run: |
