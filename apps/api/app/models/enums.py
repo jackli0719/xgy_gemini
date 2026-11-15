@@ -55,6 +55,23 @@ class MasterStatus(str, Enum):
     DISABLED = "DISABLED"
 
 
+class SettableMasterStatus(str, Enum):
+    """服务商可以设置的师傅状态。
+
+    比 ``MasterStatus`` 少一个 ``PENDING``：PENDING 是入驻流程的初始状态
+    （师傅已登记、还没通过审核），由平台侧的入驻卡产生。服务商不能把它
+    写回去——否则一个没通过审核的师傅会重新变成「可派单」的状态。
+
+    放在这里（而不是 schema 层）是因为它不是「接口长什么样」，而是
+    **业务规则**：哪些状态允许被设置，service 也要按同一份判断，
+    不能只靠请求体校验拦一道。
+    """
+
+    ACTIVE = "ACTIVE"
+    ON_LEAVE = "ON_LEAVE"
+    DISABLED = "DISABLED"
+
+
 class CatalogStatus(str, Enum):
     """服务分类 / 服务项目状态。"""
 

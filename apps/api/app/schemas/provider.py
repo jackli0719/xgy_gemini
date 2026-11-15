@@ -15,11 +15,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from decimal import Decimal
-from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.enums import MasterStatus, OrderStatus, PayStatus
+from app.models.enums import MasterStatus, OrderStatus, PayStatus, SettableMasterStatus
 
 __all__ = [
     "ProviderMasterItem",
@@ -93,25 +92,17 @@ class ProviderMasterListResponse(BaseModel):
     total: int = Field(..., description="师傅总数")
 
 
-class SettableMasterStatus(str, Enum):
-    """服务商可以设置的师傅状态。
-
-    比 ``MasterStatus`` 少一个 ``PENDING``：PENDING 是入驻流程的初始状态
-    （师傅已登记、还没通过审核），由平台侧的入驻卡产生。服务商不能把它
-    写回去——否则一个没通过审核的师傅会重新变成「可派单」的状态。
-    """
-
-    ACTIVE = "ACTIVE"
-    ON_LEAVE = "ON_LEAVE"
-    DISABLED = "DISABLED"
-
-
 class UpdateMasterStatusRequest(BaseModel):
     """改师傅状态的请求体。
 
     **只有 status 一个字段**：master_id 从路径来，服务商归属从 token 来。
     带上别的字段（比如 provider_id）会被 ``extra="forbid"`` 直接 422，
     而不是被静默忽略——静默忽略会让人以为字段生效了。
+
+    ``status`` 用的是**窄枚举** ``SettableMasterStatus``（少了 PENDING），
+    所以接口这一层就把「PENDING 不许设置」变成 422。
+    但这只是一道防线：service 那边按同一份枚举再挡一次
+    （见 app.services.master_management），免得有人绕过接口层直接调 service。
     """
 
     model_config = ConfigDict(extra="forbid")

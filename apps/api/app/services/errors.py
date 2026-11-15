@@ -21,7 +21,9 @@ __all__ = [
     "MasterActionError",
     "MasterActionForbiddenError",
     "MasterActionInvariantError",
+    "MasterNotDispatchableError",
     "MasterNotFoundError",
+    "MasterStatusNotSettableError",
     "OrderNoConflictError",
     "OrderNotFoundError",
     "PlaceOrderError",
@@ -102,6 +104,11 @@ class DispatchError(Exception):
 
     与 ``PlaceOrderError`` 平级而不是它的子类：派单与下单是两条链路，
     共用一个基类会让「下单失败」的兜底文案套到派单错误上。
+
+    这棵树现在也承载**服务商侧师傅管理**那条链路
+    （app.services.master_management）：两条链路判的是同一件事——
+    「这个师傅在不在本商作用域内、他能不能接单」，共用同一套异常与文案，
+    免得同一个错误在两个接口里长得不一样。
     """
 
 
@@ -110,6 +117,24 @@ class MasterNotFoundError(DispatchError):
 
     「不存在」与「属于别的服务商」共用同一个异常、同一句话——
     否则调用方能靠报错差异探测别家师傅是否存在（R1 租户隔离）。
+    """
+
+
+class MasterNotDispatchableError(DispatchError):
+    """师傅当前不可接单（停用 / 休假 / 未审核）。
+
+    归属校验先于状态校验：别家的师傅永远是 404（不泄露存在性），
+    本商但不可接单的师傅才是 409——「换个师傅派」是可行的应对。
+    """
+
+
+class MasterStatusNotSettableError(DispatchError):
+    """这个师傅状态不允许被设置。
+
+    服务商只能把师傅置为 ACTIVE / ON_LEAVE / DISABLED；
+    PENDING（待审核）是入驻流程的初始状态，服务商改不回去。
+    接口层用窄枚举挡过一次（PENDING -> 422），service 这边再挡一次：
+    类型提示挡不住运行时传错值。
     """
 
 

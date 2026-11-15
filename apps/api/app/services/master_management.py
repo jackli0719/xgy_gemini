@@ -29,21 +29,29 @@
 
 **师傅入驻不在本模块**：PENDING（待审核）是入驻流程的初始状态，
 由平台侧的入驻卡产生；服务商只能把师傅置为 ACTIVE / ON_LEAVE / DISABLED。
+这条规则由 ``app.models.enums.SettableMasterStatus`` 表达（**事实来源**），
+接口层用它把 PENDING 变成 422，service 用它把不合法的状态挡在库外——
+两道防线共用同一份定义，不会各写各的。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
 from app.models.audit_log import AuditLog
-from app.models.enums import MasterStatus
+from app.models.enums import MasterStatus, SettableMasterStatus
 from app.models.provider import Master
 from app.models.user import User
-from app.services.errors import DispatchForbiddenError, MasterNotFoundError
+from app.services.errors import (
+    DispatchForbiddenError,
+    MasterNotFoundError,
+    MasterStatusNotSettableError,
+)
 from app.services.provider_scope import (
     MASTER_NOT_FOUND_DETAIL,
     operator_type_for_provider_role,
@@ -56,6 +64,9 @@ AUDIT_TARGET_TYPE = "master"
 
 # 审计日志里记录的原因
 AUDIT_REASON = "服务商调整师傅状态"
+
+# 允许被设置的师傅状态（事实来源：app.models.enums.SettableMasterStatus）
+_SETTABLE_STATUS_VALUES = frozenset(s.value for s in SettableMasterStatus)
 
 
 @dataclass(frozen=True)
@@ -73,10 +84,15 @@ async def update_master_status(
     session: AsyncSession,
     *,
     master_id: int,
-    status: MasterStatus,
+    status: SettableMasterStatus | MasterStatus,
     current_user: CurrentUser,
 ) -> ManagedMaster:
     """把本商师傅改成指定状态，返回改完之后的师傅。
+
+    ``status`` 的类型声明是 ``SettableMasterStatus``（允许设置的那几个），
+    但**运行时还会再挡一次**：类型提示挡不住有人传 ``MasterStatus.PENDING``
+    进来（直接调 service 的路径绕过了接口层的窄枚举）。
+    详见 ``_resolve_settable_status``。
 
     事务：取旧值、条件 UPDATE、写审计日志、回读展示字段在同一事务内，
     要么全成要么全不成。
@@ -92,6 +108,9 @@ async def update_master_status(
     if operator_type is None:
         # 走到这里说明依赖被换掉了：不是服务商侧角色也放进了来
         raise DispatchForbiddenError("当前角色不能管理师傅")
+
+    # 状态校验放在碰库之前：不合法的状态连数据都不该看一眼
+    new_status = _resolve_settable_status(status)
 
     async with session.begin():
         # 1) 旧状态（审计日志要记 old_value）。
@@ -124,7 +143,7 @@ async def update_master_status(
                 Master.provider_id == provider_id,
             )
             .values(
-                status=status,
+                status=new_status,
                 # Core 的 UPDATE 不走 ORM 的 onupdate，得自己带上
                 updated_at=func.now(),
             )
@@ -146,7 +165,7 @@ async def update_master_status(
                 provider_id=provider_id,
                 field_name="status",
                 old_value=old_status.value,
-                new_value=status.value,
+                new_value=new_status.value,
                 reason=AUDIT_REASON,
             )
         )
@@ -177,3 +196,24 @@ async def update_master_status(
         rating=row.rating,
         status=row.status,
     )
+
+
+def _resolve_settable_status(
+    status: SettableMasterStatus | MasterStatus,
+) -> MasterStatus:
+    """把传入的状态收敛成「允许被设置」的 ``MasterStatus``。
+
+    **为什么要在这里再挡一次**：接口层用窄枚举（``SettableMasterStatus``）
+    把 PENDING 变成 422，但那条防线只在「走接口」时有效。service 也会被
+    直接调用（测试、将来的别的入口），那时类型提示挡不住运行时传错值——
+    ``MasterStatus.PENDING`` 照样能传进来。
+
+    所以这里按同一份事实来源（``app.models.enums.SettableMasterStatus``）
+    显式校验一遍：不在可设置集合里就抛业务异常，而不是照单全收。
+    """
+    value = status.value if isinstance(status, Enum) else str(status)
+    if value not in _SETTABLE_STATUS_VALUES:
+        raise MasterStatusNotSettableError(
+            "师傅状态不允许被设置为：{}".format(value)
+        )
+    return MasterStatus(value)

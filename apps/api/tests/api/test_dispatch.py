@@ -62,6 +62,11 @@ OTHER_PROVIDER_ID = 7
 # 师傅
 MY_MASTER_ID = 1
 OTHER_MASTER_ID = 8
+# 本商师傅：状态各不相同，用来验「派单要不要看师傅状态」
+DISABLED_MASTER_ID = 9  # 停用
+PENDING_MASTER_ID = 10  # 还没通过审核
+# 别家师傅 + 停用：用来验「归属校验先于状态校验」（别家的师傅永远 404）
+FOREIGN_DISABLED_MASTER_ID = 11
 
 # 订单
 OPEN_ORDER_ID = 1  # 待派单，谁都能接
@@ -77,6 +82,9 @@ MY_STAFF_USER_ID = 3
 OTHER_ADMIN_USER_ID = 4
 MY_MASTER_USER_ID = 5
 OTHER_MASTER_USER_ID = 6
+DISABLED_MASTER_USER_ID = 7
+PENDING_MASTER_USER_ID = 9
+FOREIGN_DISABLED_MASTER_USER_ID = 10
 
 # 不存在的 id
 MISSING_ORDER_ID = 999
@@ -258,6 +266,23 @@ async def seeded(db):
                 User(
                     id=OTHER_MASTER_USER_ID, phone="13900000006", role=UserRole.MASTER
                 ),
+                # 本商师傅账号（停用 / 待审核）
+                User(
+                    id=DISABLED_MASTER_USER_ID,
+                    phone="13900000007",
+                    role=UserRole.MASTER,
+                ),
+                User(
+                    id=PENDING_MASTER_USER_ID,
+                    phone="13900000009",
+                    role=UserRole.MASTER,
+                ),
+                # 别家师傅账号（停用）
+                User(
+                    id=FOREIGN_DISABLED_MASTER_USER_ID,
+                    phone="13900000010",
+                    role=UserRole.MASTER,
+                ),
             ]
         )
         await session.flush()
@@ -312,6 +337,29 @@ async def seeded(db):
                     user_id=OTHER_MASTER_USER_ID,
                     real_name="李师傅",
                     status=MasterStatus.ACTIVE,
+                ),
+                # 本商但当前不可接单的师傅
+                Master(
+                    id=DISABLED_MASTER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    user_id=DISABLED_MASTER_USER_ID,
+                    real_name="停用师傅",
+                    status=MasterStatus.DISABLED,
+                ),
+                Master(
+                    id=PENDING_MASTER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    user_id=PENDING_MASTER_USER_ID,
+                    real_name="待审师傅",
+                    status=MasterStatus.PENDING,
+                ),
+                # 别家 + 停用：归属校验先于状态校验，所以它应该是 404 而不是 409
+                Master(
+                    id=FOREIGN_DISABLED_MASTER_ID,
+                    provider_id=OTHER_PROVIDER_ID,
+                    user_id=FOREIGN_DISABLED_MASTER_USER_ID,
+                    real_name="别家停用师傅",
+                    status=MasterStatus.DISABLED,
                 ),
             ]
         )
@@ -514,6 +562,90 @@ async def test_dispatch_by_provider_staff_records_staff_as_operator(
     assert len(logs) == 1
     assert logs[0].operator_type == OperatorType.PROVIDER_STAFF
     assert logs[0].operator_id == MY_STAFF_USER_ID
+
+
+# ---------------------------------------------------------------------
+# 1.5 师傅状态：只有 ACTIVE 能接单
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_dispatch_to_inactive_master_returns_409(
+    api_client, seeded, db
+) -> None:
+    """派给停用的师傅 -> 409，订单没被派走；换个在岗的师傅就能派出去。
+
+    「能派单」和「师傅在岗」是两件事：管理页能停用一个师傅，
+    派单就该真的派不到他手上，否则停用只是个摆设。
+    """
+    rejected = await api_client.post(
+        _url(OPEN_ORDER_ID),
+        json={"master_id": DISABLED_MASTER_ID},
+        headers=_my_admin_header(),
+    )
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"] == "师傅当前不可接单：master_id={}".format(
+        DISABLED_MASTER_ID
+    )
+
+    # 订单一个字节都没动，也没留痕：状态不对就不该改订单
+    order = await _order_of(db, OPEN_ORDER_ID)
+    assert order.status == OrderStatus.PENDING_DISPATCH
+    assert order.master_id is None
+    assert order.provider_id is None
+    assert await _logs_of(db, OPEN_ORDER_ID) == []
+
+    # 同一个订单派给在岗的师傅 -> 200
+    ok = await api_client.post(
+        _url(OPEN_ORDER_ID),
+        json={"master_id": MY_MASTER_ID},
+        headers=_my_admin_header(),
+    )
+    assert ok.status_code == 200
+    assert ok.json()["master_id"] == MY_MASTER_ID
+
+
+@pytest.mark.integration
+async def test_dispatch_to_pending_master_returns_409(
+    api_client, seeded, db
+) -> None:
+    """派给还没通过审核的师傅 -> 409。
+
+    PENDING 是入驻流程的初始状态，没通过审核的师傅不是「可派单」状态——
+    与其派出去再让人拒单，不如一开始就拒。
+    """
+    response = await api_client.post(
+        _url(OPEN_ORDER_ID),
+        json={"master_id": PENDING_MASTER_ID},
+        headers=_my_admin_header(),
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "师傅当前不可接单：master_id={}".format(
+        PENDING_MASTER_ID
+    )
+
+    order = await _order_of(db, OPEN_ORDER_ID)
+    assert order.status == OrderStatus.PENDING_DISPATCH
+
+
+@pytest.mark.integration
+async def test_foreign_inactive_master_still_returns_404(
+    api_client, seeded
+) -> None:
+    """别家 + 停用的师傅 -> 404（不是 409）：归属校验先于状态校验。
+
+    顺序反了就成了存在性 oracle：409 说明「这个 id 上有个师傅，
+    只是他不能接单」，404 才什么都不说。
+    """
+    response = await api_client.post(
+        _url(OPEN_ORDER_ID),
+        json={"master_id": FOREIGN_DISABLED_MASTER_ID},
+        headers=_my_admin_header(),
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "师傅不存在：master_id={}".format(
+        FOREIGN_DISABLED_MASTER_ID
+    )
 
 
 # ---------------------------------------------------------------------

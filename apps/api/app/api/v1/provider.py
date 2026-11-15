@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import FORBIDDEN_DETAIL, CurrentUser, require_provider_scope
 from app.core.database import get_session
-from app.models.enums import MasterStatus, OrderStatus
+from app.models.enums import OrderStatus
 from app.schemas.provider import (
     ProviderMasterItem,
     ProviderMasterListResponse,
@@ -141,10 +141,12 @@ async def update_provider_master(
     # _provider_id_of 只是把「没有归属」这件事挡在 service 之前，
     # 让它跟别处的越权失败返回同一句话（Forbidden）。
     _provider_id_of(current_user)
+    # status 直接把窄枚举（SettableMasterStatus）传下去：
+    # 接口层已经把 PENDING 变成 422，service 那边按同一份枚举再挡一次。
     result = await master_management.update_master_status(
         session,
         master_id=master_id,
-        status=MasterStatus(payload.status.value),
+        status=payload.status,
         current_user=current_user,
     )
     return ProviderMasterItem(

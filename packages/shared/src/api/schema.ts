@@ -1177,6 +1177,10 @@ export interface components {
          *     比 ``MasterStatus`` 少一个 ``PENDING``：PENDING 是入驻流程的初始状态
          *     （师傅已登记、还没通过审核），由平台侧的入驻卡产生。服务商不能把它
          *     写回去——否则一个没通过审核的师傅会重新变成「可派单」的状态。
+         *
+         *     放在这里（而不是 schema 层）是因为它不是「接口长什么样」，而是
+         *     **业务规则**：哪些状态允许被设置，service 也要按同一份判断，
+         *     不能只靠请求体校验拦一道。
          * @enum {string}
          */
         SettableMasterStatus: "ACTIVE" | "ON_LEAVE" | "DISABLED";
@@ -1249,6 +1253,11 @@ export interface components {
          *     **只有 status 一个字段**：master_id 从路径来，服务商归属从 token 来。
          *     带上别的字段（比如 provider_id）会被 ``extra="forbid"`` 直接 422，
          *     而不是被静默忽略——静默忽略会让人以为字段生效了。
+         *
+         *     ``status`` 用的是**窄枚举** ``SettableMasterStatus``（少了 PENDING），
+         *     所以接口这一层就把「PENDING 不许设置」变成 422。
+         *     但这只是一道防线：service 那边按同一份枚举再挡一次
+         *     （见 app.services.master_management），免得有人绕过接口层直接调 service。
          */
         UpdateMasterStatusRequest: {
             /** @description 要把师傅改成什么状态 */

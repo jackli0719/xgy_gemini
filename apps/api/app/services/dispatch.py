@@ -3,7 +3,7 @@
 服务商把「待派单」的订单派给本商师傅，订单状态从 PENDING_DISPATCH
 推进到 PENDING_ACCEPT，等师傅接单。
 
-五条硬约束（每一条都有测试盯着）：
+七条硬约束（每一条都有测试盯着）：
 
 1. **provider_id 只从 CurrentUser 取**，本函数的签名里根本没有 provider_id
    这个参数——不是「约定别传」，是「传不进来」。租户归属一旦能由客户端
@@ -25,6 +25,11 @@
    （两个服务商都读到「还没派」，后提交的覆盖先提交的）。
    把「这单还没被派走」写进 WHERE 谓词，由数据库的行锁裁决，
    与 ``place_order._reserve_slot`` 扣库存同一套思路。
+7. **只有 ACTIVE 的师傅能接单**：停用（DISABLED）、休假（ON_LEAVE）、
+   还没通过审核（PENDING）的师傅一律 409。
+   「能派单」和「师傅在岗」是两件事：管理页能停用一个师傅，
+   派单就该真的派不到他手上，否则停用只是个摆设。
+   校验顺序在归属之后：别家的师傅永远是 404。
 
 状态变更必须留痕（R4）：每次真的发生状态变更，同一事务内写一条 order_status_log。
 
@@ -44,12 +49,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
 from app.domain.order_state import assert_transition
-from app.models.enums import OperatorType, OrderStatus, UserRole
+from app.models.enums import MasterStatus, OperatorType, OrderStatus, UserRole
 from app.models.order import Order, OrderStatusLog
 from app.models.provider import Master
 from app.services.errors import (
     DispatchForbiddenError,
     InvalidOrderStateError,
+    MasterNotDispatchableError,
     MasterNotFoundError,
     OrderNotFoundError,
 )
@@ -130,6 +136,19 @@ async def dispatch_order(
         if master is None or master.provider_id != provider_id:
             raise MasterNotFoundError(
                 MASTER_NOT_FOUND_DETAIL.format(master_id=master_id)
+            )
+
+        # 师傅当前能不能接单：只有 ACTIVE 可以。
+        # 停用（DISABLED）、休假（ON_LEAVE）、还没通过审核（PENDING）都不行。
+        #
+        # **归属校验先于状态校验**：别家的师傅一律 404（不泄露存在性），
+        # 本商但不可接单的师傅才是 409——「换个师傅派」是可行的应对。
+        #
+        # 这一步放在写订单之前：状态不对就不该改订单，
+        # 否则一次被拒的派单会留下状态流转日志。
+        if master.status != MasterStatus.ACTIVE:
+            raise MasterNotDispatchableError(
+                "师傅当前不可接单：master_id={}".format(master_id)
             )
 
         now = datetime.now(timezone.utc)

@@ -34,7 +34,9 @@ from app.services.errors import (
     MasterActionError,
     MasterActionForbiddenError,
     MasterActionInvariantError,
+    MasterNotDispatchableError,
     MasterNotFoundError,
+    MasterStatusNotSettableError,
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
@@ -92,6 +94,12 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     # 「不存在」与「属于别家」共用同一个异常，响应也完全一样，
     # 调用方无法靠报错差异探测别家师傅（R1）
     MasterNotFoundError: 404,
+    # 派单：本商师傅当前不可接单（停用 / 休假 / 未审核）
+    # 换个师傅派是可行的应对 -> 409，不是 404 也不是 500
+    MasterNotDispatchableError: 409,
+    # 师傅状态管理：请求的状态不允许被设置（PENDING 等）
+    # 属于「客户端改请求内容才可能解决」-> 400
+    MasterStatusNotSettableError: 400,
     # 师傅接单/拒单：账号没有师傅身份，或身份与服务商归属不一致
     MasterActionForbiddenError: 403,
     # 师傅接单/拒单：内部一致性被打破（服务端 bug，不是客户端的问题）

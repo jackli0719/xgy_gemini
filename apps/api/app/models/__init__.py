@@ -14,6 +14,7 @@ from app.models.enums import (
     PayStatus,
     ProviderStatus,
     SettlementStatus,
+    SettableMasterStatus,
     UserRole,
     UserStatus,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "Settlement",
     "SettlementItem",
     "SettlementStatus",
+    "SettableMasterStatus",
     "TimestampMixin",
     "User",
     "UserRole",
