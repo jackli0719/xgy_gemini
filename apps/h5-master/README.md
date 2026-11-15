@@ -6,7 +6,7 @@
 
 ```bash
 npm install                                 # 在仓库根执行（npm workspaces 会一起装）
-npm run dev  --workspace @oto/h5-master    # 开发服务器，默认 http://localhost:5174
+npm run dev  --workspace @oto/h5-master    # 开发服务器，默认 http://localhost:5175
 npm run test --workspace @oto/h5-master    # vitest
 npm run build --workspace @oto/h5-master   # 产物在 apps/h5-master/dist
 npm run typecheck --workspace @oto/h5-master
@@ -14,7 +14,8 @@ npm run typecheck --workspace @oto/h5-master
 
 后端 API 默认走**相对路径**（`/api/...`），开发时由 vite 的 proxy 转发到 `http://localhost:8000`（见 `vite.config.ts`）。要跨域直连时设置 `VITE_API_BASE_URL`。
 
-端口用 5174（用户端 h5-user 用 5173），两个应用可以同时开着调试。
+端口用 5175（与用户端 h5-user、服务商后台 web-admin 错开），三个应用可以同时开着调试。
+三端的端口对照只在 [e2e/README.md](../../e2e/README.md) 里维护，改端口时改那一处。
 
 ## 目录
 

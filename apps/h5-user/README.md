@@ -6,7 +6,7 @@
 
 ```bash
 npm install                              # 在仓库根执行（npm workspaces 会一起装）
-npm run dev  --workspace @oto/h5-user    # 开发服务器，默认 http://localhost:5173
+npm run dev  --workspace @oto/h5-user    # 开发服务器，端口见 e2e/README.md
 npm run test --workspace @oto/h5-user    # vitest
 npm run build --workspace @oto/h5-user   # 产物在 apps/h5-user/dist
 npm run typecheck --workspace @oto/h5-user

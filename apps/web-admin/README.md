@@ -8,7 +8,7 @@ Web 管理后台（Vue3 + Element Plus），平台端与服务商端共用，按
 
 ```bash
 npm install                       # 仓库根目录，装齐 workspaces
-npm run dev --workspace @oto/web-admin   # 开发服务器（5174）
+npm run dev --workspace @oto/web-admin   # 开发服务器，端口见 e2e/README.md
 make web-test                     # 前端测试（vitest）
 make web-typecheck                # 类型检查（vue-tsc）
 ```
