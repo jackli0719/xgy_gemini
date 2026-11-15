@@ -36,6 +36,8 @@ from app.services.errors import (
     MasterActionInvariantError,
     MasterNotDispatchableError,
     MasterNotFoundError,
+    MasterQueryError,
+    MasterQueryForbiddenError,
     MasterStatusNotSettableError,
     OrderNoConflictError,
     OrderNotFoundError,
@@ -58,11 +60,13 @@ __all__ = [
     "EXCEPTION_STATUS_MAP",
     "GENERIC_DETAIL",
     "MASTER_ACTION_GENERIC_DETAIL",
+    "MASTER_QUERY_GENERIC_DETAIL",
     "SERVICE_FLOW_GENERIC_DETAIL",
     "SETTLEMENT_GENERIC_DETAIL",
     "catalog_error_handler",
     "dispatch_error_handler",
     "master_action_error_handler",
+    "master_query_error_handler",
     "place_order_error_handler",
     "service_flow_error_handler",
     "settlement_error_handler",
@@ -104,6 +108,8 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     MasterActionForbiddenError: 403,
     # 师傅接单/拒单：内部一致性被打破（服务端 bug，不是客户端的问题）
     MasterActionInvariantError: 500,
+    # 师傅端查询：角色不对 / 没有师傅身份 / 身份与服务商归属不一致
+    MasterQueryForbiddenError: 403,
     # 服务流转：角色不对 / 没有师傅身份 / 身份与服务商归属不一致
     ServiceFlowForbiddenError: 403,
     # 服务流转：内部一致性被打破（服务端 bug，不是客户端的问题）
@@ -122,6 +128,7 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     PlaceOrderError: 400,
     DispatchError: 400,
     MasterActionError: 400,
+    MasterQueryError: 400,
     ServiceFlowError: 400,
     SettlementError: 400,
     CatalogError: 400,
@@ -136,6 +143,9 @@ DISPATCH_GENERIC_DETAIL = "派单失败"
 
 # 师傅接单/拒单的兜底文案
 MASTER_ACTION_GENERIC_DETAIL = "操作失败"
+
+# 师傅端查询（我的订单 / 我的资料）的兜底文案
+MASTER_QUERY_GENERIC_DETAIL = "查询失败"
 
 # 服务流转（开工 / 完工 / 确认完成）的兜底文案
 SERVICE_FLOW_GENERIC_DETAIL = "操作失败"
@@ -193,6 +203,22 @@ async def master_action_error_handler(request: Request, exc: Exception) -> JSONR
         MASTER_ACTION_GENERIC_DETAIL
         if type(exc) is MasterActionError
         else (str(exc) or MASTER_ACTION_GENERIC_DETAIL)
+    )
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )
+
+
+async def master_query_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把师傅端查询相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = (
+        MASTER_QUERY_GENERIC_DETAIL
+        if type(exc) is MasterQueryError
+        else (str(exc) or MASTER_QUERY_GENERIC_DETAIL)
     )
     return JSONResponse(
         status_code=status_for(exc),

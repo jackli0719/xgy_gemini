@@ -14,10 +14,12 @@ from app.api.v1.errors import (
     catalog_error_handler,
     dispatch_error_handler,
     master_action_error_handler,
+    master_query_error_handler,
     place_order_error_handler,
     service_flow_error_handler,
     settlement_error_handler,
 )
+from app.api.v1.master import router as master_router
 from app.api.v1.master_action import router as master_action_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.pay import router as pay_router
@@ -28,6 +30,7 @@ from app.services.errors import (
     CatalogError,
     DispatchError,
     MasterActionError,
+    MasterQueryError,
     PlaceOrderError,
     ServiceFlowError,
     SettlementError,
@@ -49,6 +52,8 @@ app.include_router(catalog_router)
 app.include_router(addresses_router)
 # 服务商侧只读查询（待派单列表 / 本商师傅列表）
 app.include_router(provider_router)
+# 师傅端只读查询（我的订单列表 / 订单详情 / 我的资料）
+app.include_router(master_router)
 # 登录是唯一不需要 token 的业务接口（它本身就是拿 token 的入口）
 app.include_router(auth_router)
 
@@ -61,6 +66,8 @@ app.add_exception_handler(SlotError, place_order_error_handler)
 app.add_exception_handler(DispatchError, dispatch_error_handler)
 # 师傅接单/拒单是第三棵异常树（MasterActionError）
 app.add_exception_handler(MasterActionError, master_action_error_handler)
+# 师傅端查询是我的订单 / 我的资料，是第七棵异常树（MasterQueryError）
+app.add_exception_handler(MasterQueryError, master_query_error_handler)
 # 服务流转（开工 / 完工 / 确认完成）是第四棵异常树（ServiceFlowError）
 app.add_exception_handler(ServiceFlowError, service_flow_error_handler)
 # 结算确认是第五棵异常树（SettlementError）

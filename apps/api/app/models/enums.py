@@ -72,6 +72,25 @@ class SettableMasterStatus(str, Enum):
     DISABLED = "DISABLED"
 
 
+class MasterOrderStatus(str, Enum):
+    """师傅端订单列表可见的三种状态。
+
+    这是**业务规则**，不是「接口长什么样」：师傅的工作队列只有三组——
+    待接单（PENDING_ACCEPT）、已接单待开工（ACCEPTED）、服务中（IN_SERVICE）。
+
+    放在这里（而不是 schema 层）是因为 service 也要按同一份判断：
+    接口层用窄枚举把别的状态挡成 422，service 这边再挡一次，
+    免得有人绕过接口层直接调 service（类型提示挡不住运行时传错值）。
+
+    与 ``OrderStatus`` 的取值同名但不是同一个类型：订单状态机有 12 态，
+    师傅端只关心其中三个。
+    """
+
+    PENDING_ACCEPT = "PENDING_ACCEPT"
+    ACCEPTED = "ACCEPTED"
+    IN_SERVICE = "IN_SERVICE"
+
+
 class CatalogStatus(str, Enum):
     """服务分类 / 服务项目状态。"""
 

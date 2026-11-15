@@ -430,6 +430,71 @@ export interface paths {
         patch: operations["update_provider_master_api_v1_provider_masters__master_id__patch"];
         trace?: never;
     };
+    "/api/v1/master/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我的订单列表（按状态）
+         * @description 列出派给我的、处于指定状态的订单。
+         *
+         *     归属由 token 决定（服务端按 user_id 查 master 表），
+         *     这里不接收 master_id 入参。
+         */
+        get: operations["list_master_orders_api_v1_master_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/master/orders/{order_no}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 订单详情
+         * @description 返回派给我的一笔订单详情（含客户联系方式与上门地址）。
+         *
+         *     订单不存在或不是派给我的 -> 404（两种情况同构）。
+         */
+        get: operations["get_master_order_api_v1_master_orders__order_no__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/master/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我的资料
+         * @description 返回当前师傅的资料（姓名 / 评分 / 状态 / 所属服务商）。
+         */
+        get: operations["get_master_profile_api_v1_master_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -722,6 +787,217 @@ export interface components {
              * @description 归属的服务商 ID；服务商侧角色才有值，其余角色为 null
              */
             provider_id: number | null;
+        };
+        /**
+         * MasterOrderDetail
+         * @description 订单详情：多了客户联系方式与上门地址。
+         *
+         *     师傅要上门服务，得知道去哪儿、找谁——所以详情里带地址与电话。
+         *     可见范围由服务端保证：只有派给他的订单才查得到（404 同构）。
+         */
+        MasterOrderDetail: {
+            /**
+             * Order No
+             * @description 订单号
+             */
+            order_no: string;
+            /** @description 订单状态 */
+            status: components["schemas"]["OrderStatus"];
+            /**
+             * Amount
+             * @description 订单金额
+             */
+            amount: string;
+            /**
+             * Item Id
+             * @description 服务项 ID
+             */
+            item_id: number;
+            /**
+             * Item Name
+             * @description 服务项名称
+             */
+            item_name: string;
+            /**
+             * Slot Date
+             * Format: date
+             * @description 预约日期
+             */
+            slot_date: string;
+            /**
+             * Slot Start Time
+             * Format: time
+             * @description 预约开始时间
+             */
+            slot_start_time: string;
+            /**
+             * Slot End Time
+             * Format: time
+             * @description 预约结束时间
+             */
+            slot_end_time: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 下单时间
+             */
+            created_at: string;
+            /**
+             * Id
+             * @description 订单 ID
+             */
+            id: number;
+            /**
+             * Slot Id
+             * @description 预约时段 ID
+             */
+            slot_id: number;
+            /**
+             * Customer Contact
+             * @description 客户称呼
+             */
+            customer_contact: string;
+            /**
+             * Customer Phone
+             * @description 客户电话
+             */
+            customer_phone: string;
+            /**
+             * Address Region
+             * @description 地址所在区域
+             */
+            address_region: string;
+            /**
+             * Address Detail
+             * @description 详细地址
+             */
+            address_detail: string;
+        };
+        /**
+         * MasterOrderItem
+         * @description 师傅端订单列表里的一项。
+         *
+         *     不含 master_id / provider_id：师傅知道自己是谁，不需要知道订单内部
+         *     怎么归属的（也不该由客户端去猜）。
+         */
+        MasterOrderItem: {
+            /**
+             * Order No
+             * @description 订单号
+             */
+            order_no: string;
+            /** @description 订单状态 */
+            status: components["schemas"]["OrderStatus"];
+            /**
+             * Amount
+             * @description 订单金额
+             */
+            amount: string;
+            /**
+             * Item Id
+             * @description 服务项 ID
+             */
+            item_id: number;
+            /**
+             * Item Name
+             * @description 服务项名称
+             */
+            item_name: string;
+            /**
+             * Slot Date
+             * Format: date
+             * @description 预约日期
+             */
+            slot_date: string;
+            /**
+             * Slot Start Time
+             * Format: time
+             * @description 预约开始时间
+             */
+            slot_start_time: string;
+            /**
+             * Slot End Time
+             * Format: time
+             * @description 预约结束时间
+             */
+            slot_end_time: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 下单时间
+             */
+            created_at: string;
+        };
+        /**
+         * MasterOrderListResponse
+         * @description 订单列表（一页 + 总数）。
+         *
+         *     带 total 是因为前端要显示「共 N 条」并判断还有没有下一页；
+         *     只回一个数组的话，客户端只能靠「这页有没有满 limit」去猜。
+         */
+        MasterOrderListResponse: {
+            /**
+             * Items
+             * @description 当前页的订单
+             */
+            items: components["schemas"]["MasterOrderItem"][];
+            /**
+             * Total
+             * @description 符合条件的订单总数（不受分页影响）
+             */
+            total: number;
+            /**
+             * Limit
+             * @description 本次生效的每页条数（上限 100）
+             */
+            limit: number;
+            /**
+             * Offset
+             * @description 本次跳过的条数
+             */
+            offset: number;
+        };
+        /**
+         * MasterOrderStatus
+         * @description 师傅端订单列表可见的三种状态。
+         *
+         *     这是**业务规则**，不是「接口长什么样」：师傅的工作队列只有三组——
+         *     待接单（PENDING_ACCEPT）、已接单待开工（ACCEPTED）、服务中（IN_SERVICE）。
+         *
+         *     放在这里（而不是 schema 层）是因为 service 也要按同一份判断：
+         *     接口层用窄枚举把别的状态挡成 422，service 这边再挡一次，
+         *     免得有人绕过接口层直接调 service（类型提示挡不住运行时传错值）。
+         *
+         *     与 ``OrderStatus`` 的取值同名但不是同一个类型：订单状态机有 12 态，
+         *     师傅端只关心其中三个。
+         * @enum {string}
+         */
+        MasterOrderStatus: "PENDING_ACCEPT" | "ACCEPTED" | "IN_SERVICE";
+        /**
+         * MasterProfile
+         * @description 师傅自己的资料。
+         *
+         *     ``rating`` 可以是空：还没被评价过的师傅没有分数。
+         *     ``provider_name`` 是所属服务商的名称（师傅要知道自己是哪家的）。
+         */
+        MasterProfile: {
+            /**
+             * Real Name
+             * @description 师傅姓名
+             */
+            real_name: string;
+            /**
+             * Rating
+             * @description 评分（0~5，可空）
+             */
+            rating?: string | null;
+            /** @description 师傅状态 */
+            status: components["schemas"]["MasterStatus"];
+            /**
+             * Provider Name
+             * @description 所属服务商名称
+             */
+            provider_name: string;
         };
         /**
          * MasterStatus
@@ -2041,6 +2317,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderMasterItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_master_orders_api_v1_master_orders_get: {
+        parameters: {
+            query?: {
+                /** @description 按订单状态过滤，只接受师傅端的三种：PENDING_ACCEPT（待接单）/ ACCEPTED（已接单待开工）/ IN_SERVICE（服务中） */
+                status?: components["schemas"]["MasterOrderStatus"];
+                /** @description 每页条数，默认 20，上限 100（超过按 100 算） */
+                limit?: number;
+                /** @description 跳过的条数，默认 0 */
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MasterOrderListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_master_order_api_v1_master_orders__order_no__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 订单号 */
+                order_no: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MasterOrderDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_master_profile_api_v1_master_profile_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MasterProfile"];
                 };
             };
             /** @description Validation Error */

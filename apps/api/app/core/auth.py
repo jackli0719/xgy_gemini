@@ -41,6 +41,7 @@ __all__ = [
     "get_current_user",
     "is_provider_role",
     "is_valid_role_provider_pair",
+    "require_master_scope",
     "require_provider_scope",
 ]
 
@@ -179,6 +180,26 @@ async def require_provider_scope(
     做租户过滤——不用再从请求参数里问「你要处理哪个服务商的订单」。
     """
     if not is_provider_role(current.role) or current.provider_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=FORBIDDEN_DETAIL,
+        )
+    return current
+
+
+async def require_master_scope(
+    current: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """FastAPI 依赖：要求当前用户是师傅（MASTER 角色）。
+
+    通过条件：角色是 MASTER。不满足 -> 403 Forbidden，消息不区分失败原因
+    （与服务商侧的 require_provider_scope 同一句话）。
+
+    注意这里只判**角色**，不判「这个账号有没有师傅身份」：
+    那是 service 层按 master 表查出来的（见 app.services.master_queries），
+    依赖层不查库——鉴权路径不该绑上数据库可用性。
+    """
+    if current.role is not UserRole.MASTER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=FORBIDDEN_DETAIL,

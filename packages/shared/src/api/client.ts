@@ -111,6 +111,9 @@ type LoginOp = operations["login_api_v1_auth_login_post"];
 type ListProviderOrdersOp = operations["list_provider_orders_api_v1_provider_orders_get"];
 type ListProviderMastersOp = operations["list_provider_masters_api_v1_provider_masters_get"];
 type UpdateProviderMasterOp = operations["update_provider_master_api_v1_provider_masters__master_id__patch"];
+type ListMasterOrdersOp = operations["list_master_orders_api_v1_master_orders_get"];
+type GetMasterOrderOp = operations["get_master_order_api_v1_master_orders__order_no__get"];
+type GetMasterProfileOp = operations["get_master_profile_api_v1_master_profile_get"];
 
 /** 从错误响应体里挑出文案。 */
 function detailOf(body: unknown): string | undefined {
@@ -364,6 +367,39 @@ export function createApiClient(options: ApiClientOptions = {}) {
         `/api/v1/provider/masters/${encodeURIComponent(String(params.master_id))}`,
         { body },
       );
+    },
+
+    // -----------------------------------------------------------------
+    // 师傅端
+    //
+    // 这几个接口**不传 master_id**：师傅身份由服务端按 token 里的 user_id
+    // 查 master 表得到，客户端自报身份等于自己挑单（R1）。
+    // -----------------------------------------------------------------
+
+    /**
+     * 我的订单列表（只返回派给我的单）。
+     *
+     * `status` 只接受师傅端的三种：PENDING_ACCEPT / ACCEPTED / IN_SERVICE。
+     */
+    listMasterOrders(
+      params: QueryParamsOf<ListMasterOrdersOp> = {},
+    ): Promise<ResponseOf<ListMasterOrdersOp>> {
+      return send<ListMasterOrdersOp>("GET", "/api/v1/master/orders", {
+        query: { status: params.status, limit: params.limit, offset: params.offset },
+      });
+    },
+
+    /** 订单详情（只查得到派给我的单，别人的是 404）。 */
+    getMasterOrder(params: PathParamsOf<GetMasterOrderOp>): Promise<ResponseOf<GetMasterOrderOp>> {
+      return send<GetMasterOrderOp>(
+        "GET",
+        `/api/v1/master/orders/${encodeURIComponent(params.order_no)}`,
+      );
+    },
+
+    /** 我的资料（姓名 / 评分 / 状态 / 所属服务商）。 */
+    getMasterProfile(): Promise<ResponseOf<GetMasterProfileOp>> {
+      return send<GetMasterProfileOp>("GET", "/api/v1/master/profile");
     },
 
     // -----------------------------------------------------------------

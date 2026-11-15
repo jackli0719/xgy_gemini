@@ -23,6 +23,8 @@ __all__ = [
     "MasterActionInvariantError",
     "MasterNotDispatchableError",
     "MasterNotFoundError",
+    "MasterQueryError",
+    "MasterQueryForbiddenError",
     "MasterStatusNotSettableError",
     "OrderNoConflictError",
     "OrderNotFoundError",
@@ -176,6 +178,26 @@ class MasterActionInvariantError(MasterActionError):
     等待行锁期间被改走又改回），对调用方一律是 404。
     其中「改走又改回」（ABA）在回查里与「谓词写错」长得一样，
     分不出来也不该分——它就是一次普通的状态变化，客户端重试即可。
+    """
+
+
+class MasterQueryError(Exception):
+    """师傅端查询（我的订单列表 / 订单详情 / 我的资料）失败的业务异常基类。
+
+    与前六棵异常树（PlaceOrderError / DispatchError / MasterActionError /
+    ServiceFlowError / SettlementError / CatalogError）平级：
+    师傅端查询是独立的一条链路，共用一个基类会让别的链路的兜底文案
+    套到它头上。
+    """
+
+
+class MasterQueryForbiddenError(MasterQueryError):
+    """当前账号不能查师傅端数据。
+
+    典型场景：角色不对（拿普通用户 / 服务商账号来查师傅端数据）；
+    或者账号在 master 表里没有师傅身份；
+    或者它同时是服务商账号，但 token 里的服务商归属与师傅归属不一致。
+    这种账号连订单都查不到就该被挡住。
     """
 
 

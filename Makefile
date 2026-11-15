@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps test test-unit test-file openapi h5-test h5-build h5-typecheck web-test web-build web-typecheck
+.PHONY: help up down logs ps test test-unit test-file openapi h5-test h5-build h5-typecheck master-h5-test master-h5-build master-h5-typecheck web-test web-build web-typecheck
 
 COMPOSE_FILE := infra/compose/docker-compose.dev.yml
 COMPOSE_PORTS_FILE := infra/compose/docker-compose.dev.ports.yml
@@ -71,6 +71,17 @@ h5-build: ## 构建用户端 H5（产物在 apps/h5-user/dist）
 
 h5-typecheck: ## 用户端 H5 类型检查（vue-tsc）
 	npm run typecheck --workspace @oto/h5-user
+
+# ---- 前端：师傅端 H5 ----
+# 独立工程（apps/h5-master），用 npm workspaces 里的脚本跑。
+master-h5-test: ## 跑师傅端 H5 的前端测试（vitest）
+	npm run test --workspace @oto/h5-master
+
+master-h5-build: ## 构建师傅端 H5（产物在 apps/h5-master/dist）
+	npm run build --workspace @oto/h5-master
+
+master-h5-typecheck: ## 师傅端 H5 类型检查（vue-tsc）
+	npm run typecheck --workspace @oto/h5-master
 
 # ---- 前端：服务商 Web 后台 ----
 # 独立工程（apps/web-admin），同样用 npm workspaces 里的脚本跑。
