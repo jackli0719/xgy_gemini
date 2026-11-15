@@ -495,6 +495,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 服务商列表（平台侧，分页）
+         * @description 列出平台侧可见的全部服务商。
+         */
+        get: operations["list_platform_providers_api_v1_platform_providers_get"];
+        put?: never;
+        /**
+         * 新建服务商（初始状态：待审核）
+         * @description 建一个服务商，初始状态是「待审核」（PENDING）。
+         *
+         *     状态**不由请求体决定**：新建一律待审核，要审核通过再调改状态接口。
+         */
+        post: operations["create_platform_provider_api_v1_platform_providers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/providers/{provider_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 改服务商状态（审核通过 / 冻结 / 解冻）
+         * @description 把服务商改成指定状态。
+         *
+         *     当前状态不允许这次流转 -> 409（条件 UPDATE 没命中）。
+         *     服务商不存在 -> 404。
+         */
+        patch: operations["update_platform_provider_status_api_v1_platform_providers__provider_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/platform/providers/{provider_id}/admin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 给服务商建管理员账号
+         * @description 给某个服务商建一个 PROVIDER_ADMIN 账号（入参只有手机号）。
+         *
+         *     手机号已被占用 -> 409「手机号已注册」。
+         */
+        post: operations["create_platform_provider_admin_api_v1_platform_providers__provider_id__admin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -683,6 +754,45 @@ export interface components {
              * @description 确认时间（确认后非空）
              */
             confirmed_at?: string | null;
+        };
+        /**
+         * CreateProviderAdminRequest
+         * @description 给某个服务商建管理员账号的请求体。
+         *
+         *     **只有手机号**：账号的角色（PROVIDER_ADMIN）与归属（provider_id）
+         *     都由服务端按路径与规则填，客户端说了不算。
+         */
+        CreateProviderAdminRequest: {
+            /**
+             * Phone
+             * @description 管理员登录用的手机号（纯数字）
+             */
+            phone: string;
+        };
+        /**
+         * CreateProviderRequest
+         * @description 新建服务商的请求体。
+         *
+         *     **只有这三个字段**：服务商归属（也就是「归谁管」）由平台侧决定，
+         *     不在请求体里；状态也不在——新建一律「待审核」（PENDING），
+         *     要审核通过再调改状态接口。
+         */
+        CreateProviderRequest: {
+            /**
+             * Name
+             * @description 服务商名称
+             */
+            name: string;
+            /**
+             * Contact Phone
+             * @description 联系电话
+             */
+            contact_phone: string;
+            /**
+             * Commission Rate
+             * @description 佣金比例（0~1，例如 0.15 表示 15%）
+             */
+            commission_rate: number | string;
         };
         /**
          * DispatchRequest
@@ -1237,6 +1347,95 @@ export interface components {
             address_id: number;
         };
         /**
+         * PlatformProviderItem
+         * @description 平台侧看到的一条服务商。
+         */
+        PlatformProviderItem: {
+            /**
+             * Id
+             * @description 服务商 ID
+             */
+            id: number;
+            /**
+             * Name
+             * @description 服务商名称
+             */
+            name: string;
+            /**
+             * Contact Phone
+             * @description 联系电话
+             */
+            contact_phone: string;
+            /**
+             * Commission Rate
+             * @description 佣金比例（0~1）
+             */
+            commission_rate: string;
+            /** @description 服务商状态 */
+            status: components["schemas"]["ProviderStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             * @description 建档时间
+             */
+            created_at: string;
+        };
+        /**
+         * PlatformProviderListResponse
+         * @description 服务商列表（一页 + 总数）。
+         */
+        PlatformProviderListResponse: {
+            /**
+             * Items
+             * @description 当前页的服务商
+             */
+            items: components["schemas"]["PlatformProviderItem"][];
+            /**
+             * Total
+             * @description 符合条件的服务商总数（不受分页影响）
+             */
+            total: number;
+            /**
+             * Page
+             * @description 当前页码（从 1 开始）
+             */
+            page: number;
+            /**
+             * Limit
+             * @description 本次生效的每页条数（上限 100）
+             */
+            limit: number;
+        };
+        /**
+         * ProviderAdminItem
+         * @description 刚建出来的服务商管理员账号。
+         */
+        ProviderAdminItem: {
+            /**
+             * Id
+             * @description 用户 ID
+             */
+            id: number;
+            /**
+             * Phone
+             * @description 登录手机号
+             */
+            phone: string;
+            /** @description 用户角色（PROVIDER_ADMIN） */
+            role: components["schemas"]["UserRole"];
+            /**
+             * Provider Id
+             * @description 归属的服务商 ID
+             */
+            provider_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 建号时间
+             */
+            created_at: string;
+        };
+        /**
          * ProviderMasterItem
          * @description 本商师傅的一项。
          *
@@ -1370,6 +1569,27 @@ export interface components {
             offset: number;
         };
         /**
+         * ProviderStatus
+         * @description 服务商状态。
+         *
+         *     - ``PENDING``：待审核。平台侧刚建出来的初始状态，审核通过后转 ACTIVE；
+         *     - ``ACTIVE``：正常营业；
+         *     - ``FROZEN``：被平台冻结（不能接新单，但已有订单还要继续处理）。
+         *
+         *     ``SUSPENDED`` / ``CLOSED`` 是早期设计的停用 / 关停取值，**现在已废弃**：
+         *     全仓库没有任何代码写这两个值。但 PostgreSQL 的枚举取值删不掉
+         *     （见迁移 0007），所以它们仍然留在类型里——留着是为了让
+         *     「create_all 建的测试库」与「alembic 建的开发库」枚举取值集合一致。
+         *
+         *     **取值顺序与迁移建出来的库不一样**：迁移 0001 建的是
+         *     (ACTIVE, SUSPENDED, CLOSED)，0007 追加的是 (PENDING, FROZEN)，
+         *     而这里是按业务含义排的。PostgreSQL 的枚举排序按「取值在类型里的
+         *     先后」，所以**不要按 status 排序**（列表接口按 id 排，见
+         *     app.services.platform_provider.list_providers）。
+         * @enum {string}
+         */
+        ProviderStatus: "PENDING" | "ACTIVE" | "FROZEN" | "SUSPENDED" | "CLOSED";
+        /**
          * RejectRequest
          * @description 拒单请求体。
          */
@@ -1464,6 +1684,20 @@ export interface components {
          */
         SettableMasterStatus: "ACTIVE" | "ON_LEAVE" | "DISABLED";
         /**
+         * SettableProviderStatus
+         * @description 平台侧可以把服务商置成的状态。
+         *
+         *     比 ``ProviderStatus`` 少了 ``PENDING``：PENDING 是建号时的初始状态，
+         *     平台不能把服务商改回待审核（那等于让审核白做）。
+         *     也没带上两个废弃取值。
+         *
+         *     放在这里（而不是 schema 层）是因为它不是「接口长什么样」，而是
+         *     **业务规则**：哪些状态允许被设置，service 也要按同一份判断，
+         *     不能只靠请求体校验拦一道（与 ``SettableMasterStatus`` 同一思路）。
+         * @enum {string}
+         */
+        SettableProviderStatus: "ACTIVE" | "FROZEN";
+        /**
          * SettlementStatus
          * @description 结算单状态。
          *
@@ -1541,6 +1775,19 @@ export interface components {
         UpdateMasterStatusRequest: {
             /** @description 要把师傅改成什么状态 */
             status: components["schemas"]["SettableMasterStatus"];
+        };
+        /**
+         * UpdateProviderStatusRequest
+         * @description 改服务商状态的请求体。
+         *
+         *     ``status`` 用的是**窄枚举** ``SettableProviderStatus``（ACTIVE / FROZEN），
+         *     所以接口这一层就把「PENDING 不许设置」变成 422。
+         *     但这只是一道防线：service 那边按同一份枚举再挡一次
+         *     （见 app.services.platform_provider），免得有人绕过接口层直接调 service。
+         */
+        UpdateProviderStatusRequest: {
+            /** @description 要把服务商改成什么状态 */
+            status: components["schemas"]["SettableProviderStatus"];
         };
         /**
          * UserRole
@@ -2423,6 +2670,155 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MasterProfile"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_platform_providers_api_v1_platform_providers_get: {
+        parameters: {
+            query?: {
+                /** @description 按状态过滤，不传=全部 */
+                status?: components["schemas"]["ProviderStatus"] | null;
+                /** @description 页码，从 1 开始 */
+                page?: number;
+                /** @description 每页条数，默认 20，上限 100（超过按 100 算） */
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformProviderListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_platform_provider_api_v1_platform_providers_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProviderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformProviderItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_platform_provider_status_api_v1_platform_providers__provider_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 服务商 ID */
+                provider_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProviderStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformProviderItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_platform_provider_admin_api_v1_platform_providers__provider_id__admin_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 服务商 ID */
+                provider_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProviderAdminRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderAdminItem"];
                 };
             };
             /** @description Validation Error */

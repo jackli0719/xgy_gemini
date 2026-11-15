@@ -46,6 +46,13 @@ export const useSessionStore = defineStore("session", () => {
   const isLoggedIn = computed(() => Boolean(token.value));
   /** 是否服务商侧账号（有归属才能进服务商作用域）。 */
   const isProvider = computed(() => currentUser.value?.provider_id != null);
+  /**
+   * 是否平台管理员。
+   *
+   * 只用于**显示**（菜单按角色过滤）：真正的边界在后端，
+   * 服务商侧接口对平台账号一律 403。
+   */
+  const isPlatformAdmin = computed(() => currentUser.value?.role === "PLATFORM_ADMIN");
 
   function setToken(value: string): void {
     token.value = value;
@@ -69,6 +76,7 @@ export const useSessionStore = defineStore("session", () => {
     currentUser,
     isLoggedIn,
     isProvider,
+    isPlatformAdmin,
     setToken,
     setCurrentUser,
     clear,

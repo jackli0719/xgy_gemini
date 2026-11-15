@@ -16,6 +16,7 @@ from app.api.v1.errors import (
     master_action_error_handler,
     master_query_error_handler,
     place_order_error_handler,
+    platform_provider_error_handler,
     service_flow_error_handler,
     settlement_error_handler,
 )
@@ -23,6 +24,7 @@ from app.api.v1.master import router as master_router
 from app.api.v1.master_action import router as master_action_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.pay import router as pay_router
+from app.api.v1.platform import router as platform_router
 from app.api.v1.provider import router as provider_router
 from app.api.v1.settlements import router as settlements_router
 from app.domain.slot_rule import SlotError
@@ -32,6 +34,7 @@ from app.services.errors import (
     MasterActionError,
     MasterQueryError,
     PlaceOrderError,
+    PlatformProviderError,
     ServiceFlowError,
     SettlementError,
 )
@@ -54,6 +57,8 @@ app.include_router(addresses_router)
 app.include_router(provider_router)
 # 师傅端只读查询（我的订单列表 / 订单详情 / 我的资料）
 app.include_router(master_router)
+# 平台侧服务商管理（服务商列表 / 建档 / 改状态 / 建管理员账号）
+app.include_router(platform_router)
 # 登录是唯一不需要 token 的业务接口（它本身就是拿 token 的入口）
 app.include_router(auth_router)
 
@@ -74,3 +79,5 @@ app.add_exception_handler(ServiceFlowError, service_flow_error_handler)
 app.add_exception_handler(SettlementError, settlement_error_handler)
 # 目录查询（品类 / 服务项 / 时段）是第六棵异常树（CatalogError）
 app.add_exception_handler(CatalogError, catalog_error_handler)
+# 平台侧服务商管理是第八棵异常树（PlatformProviderError）
+app.add_exception_handler(PlatformProviderError, platform_provider_error_handler)

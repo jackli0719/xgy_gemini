@@ -54,6 +54,15 @@ const PROVIDER_ADMIN_PHONE = "13800000002";
 const MASTER_PHONE = "13800000003";
 const MASTER_NAME = "张师傅";
 
+/**
+ * 平台管理员账号（PLAT-01 的服务商管理页只有这个角色能进）。
+ *
+ * 平台侧角色**不带服务商归属**（数据库 CHECK 约束 ck_user_role_provider
+ * 强制：只有 PROVIDER_ADMIN / PROVIDER_STAFF 能有 provider_id），
+ * 所以这个账号没有 provider_id。
+ */
+const PLATFORM_ADMIN_PHONE = "13800000004";
+
 /** 客户手机号：不在库里种——C 端是「登录即注册」。 */
 const CUSTOMER_PHONE = "13800000001";
 
@@ -64,6 +73,7 @@ const DEFAULT_LOGIN_CODE = "123456";
 const ENTITY_LABELS: Record<string, string> = {
   service_provider: "服务商",
   user_admin: "服务商管理员账号",
+  user_platform_admin: "平台管理员账号",
   user_master: "师傅账号",
   master: "师傅",
   service_category: "服务品类",
@@ -334,7 +344,22 @@ WITH ins AS (
 SELECT 'user_admin', ins.id::text, ins.created,
        ins.phone || ' ' || ins.role::text FROM ins;
 
--- 3. 师傅账号
+-- 3. 平台管理员账号（PLAT-01 的服务商管理页只有这个角色能进）
+-- 平台侧角色不带服务商归属（数据库 CHECK 约束 ck_user_role_provider 强制）
+WITH ins AS (
+    INSERT INTO "user"
+           (phone, nickname, role, status, provider_id, created_at, updated_at)
+    SELECT ${lit(PLATFORM_ADMIN_PHONE)}, '演示平台管理员', 'PLATFORM_ADMIN', 'ACTIVE',
+           NULL, now(), now()
+    ON CONFLICT (phone) DO UPDATE
+       SET nickname = EXCLUDED.nickname, role = EXCLUDED.role, status = EXCLUDED.status,
+           provider_id = NULL, updated_at = now()
+    RETURNING id, phone, role, (xmax = 0) AS created
+)
+SELECT 'user_platform_admin', ins.id::text, ins.created,
+       ins.phone || ' ' || ins.role::text FROM ins;
+
+-- 4. 师傅账号
 -- 师傅的归属权威来源是 master 表，所以 user.provider_id 必须是空的
 -- （数据库 CHECK 约束 ck_user_role_provider 强制）
 WITH ins AS (
@@ -349,7 +374,7 @@ WITH ins AS (
 SELECT 'user_master', ins.id::text, ins.created,
        ins.phone || ' ' || ins.role::text FROM ins;
 
--- 4. 师傅（挂在服务商下）
+-- 5. 师傅（挂在服务商下）
 WITH ins AS (
     INSERT INTO master
            (provider_id, user_id, real_name, status, rating, created_at, updated_at)
@@ -363,7 +388,7 @@ WITH ins AS (
 )
 SELECT 'master', ins.id::text, ins.created, ins.real_name FROM ins;
 
--- 5. 服务品类
+-- 6. 服务品类
 WITH upd AS (
     UPDATE service_category
        SET status = 'ACTIVE', sort_order = 0, updated_at = now()
@@ -380,7 +405,7 @@ SELECT 'service_category', upd.id::text, false, ${lit(CATEGORY_NAME)} FROM upd
 UNION ALL
 SELECT 'service_category', ins.id::text, true, ${lit(CATEGORY_NAME)} FROM ins;
 
--- 6. 服务项目
+-- 7. 服务项目
 WITH upd AS (
     UPDATE service_item
        SET base_price = ${ITEM_PRICE}, duration_min = ${ITEM_DURATION_MIN},
@@ -399,7 +424,7 @@ SELECT 'service_item', upd.id::text, false, ${lit(ITEM_NAME)} FROM upd
 UNION ALL
 SELECT 'service_item', ins.id::text, true, ${lit(ITEM_NAME)} FROM ins;
 
--- 7. 预约时段（明天 ${SLOT_START}-${SLOT_END}）
+-- 8. 预约时段（明天 ${SLOT_START}-${SLOT_END}）
 -- 已经存在的时段只更新 end_time / capacity，不动 used：
 -- used 是被订单占掉的库存，重置它会让已下单的时段凭空多出名额。
 WITH ins AS (
@@ -439,6 +464,7 @@ function cmdSeed(env: Record<string, string>, target: DatabaseTarget): void {
     `[seed] 客户       ${CUSTOMER_PHONE}   验证码 ${code}   （首次登录自动注册）`,
   );
   console.log(`[seed] 服务商     ${PROVIDER_ADMIN_PHONE}   验证码 ${code}`);
+  console.log(`[seed] 平台管理员 ${PLATFORM_ADMIN_PHONE}   验证码 ${code}`);
   console.log(`[seed] 师傅       ${MASTER_PHONE}   验证码 ${code}`);
   console.log("[seed] ---------------- 前端 ----------------");
   console.log("[seed] 用户端   http://localhost:5173");
@@ -523,7 +549,8 @@ WITH d AS (
 SELECT 'master', count(*)::text, '已删师傅' FROM d;
 
 WITH d AS (
-    DELETE FROM "user" WHERE phone IN (${lit(PROVIDER_ADMIN_PHONE)}, ${lit(MASTER_PHONE)})
+    DELETE FROM "user" WHERE phone IN (${lit(PROVIDER_ADMIN_PHONE)}, ${lit(MASTER_PHONE)},
+                                        ${lit(PLATFORM_ADMIN_PHONE)})
     RETURNING id
 )
 SELECT 'user', count(*)::text, '已删账号' FROM d;
@@ -542,7 +569,8 @@ function countSeedRows(target: DatabaseTarget): number {
   const sql = `
 SELECT count(*) FROM service_provider WHERE name = ${lit(PROVIDER_NAME)}
 UNION ALL
-SELECT count(*) FROM "user" WHERE phone IN (${lit(PROVIDER_ADMIN_PHONE)}, ${lit(MASTER_PHONE)})
+SELECT count(*) FROM "user" WHERE phone IN (${lit(PROVIDER_ADMIN_PHONE)}, ${lit(MASTER_PHONE)},
+                                        ${lit(PLATFORM_ADMIN_PHONE)})
 UNION ALL
 SELECT count(*) FROM master WHERE real_name = ${lit(MASTER_NAME)}
 UNION ALL

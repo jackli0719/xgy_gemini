@@ -39,11 +39,45 @@ class UserRole(str, Enum):
 
 
 class ProviderStatus(str, Enum):
-    """服务商状态。"""
+    """服务商状态。
 
+    - ``PENDING``：待审核。平台侧刚建出来的初始状态，审核通过后转 ACTIVE；
+    - ``ACTIVE``：正常营业；
+    - ``FROZEN``：被平台冻结（不能接新单，但已有订单还要继续处理）。
+
+    ``SUSPENDED`` / ``CLOSED`` 是早期设计的停用 / 关停取值，**现在已废弃**：
+    全仓库没有任何代码写这两个值。但 PostgreSQL 的枚举取值删不掉
+    （见迁移 0007），所以它们仍然留在类型里——留着是为了让
+    「create_all 建的测试库」与「alembic 建的开发库」枚举取值集合一致。
+
+    **取值顺序与迁移建出来的库不一样**：迁移 0001 建的是
+    (ACTIVE, SUSPENDED, CLOSED)，0007 追加的是 (PENDING, FROZEN)，
+    而这里是按业务含义排的。PostgreSQL 的枚举排序按「取值在类型里的
+    先后」，所以**不要按 status 排序**（列表接口按 id 排，见
+    app.services.platform_provider.list_providers）。
+    """
+
+    PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    FROZEN = "FROZEN"
     SUSPENDED = "SUSPENDED"
     CLOSED = "CLOSED"
+
+
+class SettableProviderStatus(str, Enum):
+    """平台侧可以把服务商置成的状态。
+
+    比 ``ProviderStatus`` 少了 ``PENDING``：PENDING 是建号时的初始状态，
+    平台不能把服务商改回待审核（那等于让审核白做）。
+    也没带上两个废弃取值。
+
+    放在这里（而不是 schema 层）是因为它不是「接口长什么样」，而是
+    **业务规则**：哪些状态允许被设置，service 也要按同一份判断，
+    不能只靠请求体校验拦一道（与 ``SettableMasterStatus`` 同一思路）。
+    """
+
+    ACTIVE = "ACTIVE"
+    FROZEN = "FROZEN"
 
 
 class MasterStatus(str, Enum):

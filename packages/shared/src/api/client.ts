@@ -114,6 +114,11 @@ type UpdateProviderMasterOp = operations["update_provider_master_api_v1_provider
 type ListMasterOrdersOp = operations["list_master_orders_api_v1_master_orders_get"];
 type GetMasterOrderOp = operations["get_master_order_api_v1_master_orders__order_no__get"];
 type GetMasterProfileOp = operations["get_master_profile_api_v1_master_profile_get"];
+type ListPlatformProvidersOp = operations["list_platform_providers_api_v1_platform_providers_get"];
+type CreatePlatformProviderOp = operations["create_platform_provider_api_v1_platform_providers_post"];
+type UpdatePlatformProviderStatusOp = operations["update_platform_provider_status_api_v1_platform_providers__provider_id__patch"];
+type CreatePlatformProviderAdminOp = operations["create_platform_provider_admin_api_v1_platform_providers__provider_id__admin_post"];
+
 
 /** 从错误响应体里挑出文案。 */
 function detailOf(body: unknown): string | undefined {
@@ -400,6 +405,72 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** 我的资料（姓名 / 评分 / 状态 / 所属服务商）。 */
     getMasterProfile(): Promise<ResponseOf<GetMasterProfileOp>> {
       return send<GetMasterProfileOp>("GET", "/api/v1/master/profile");
+    },
+
+    // -----------------------------------------------------------------
+    // 平台侧：服务商管理
+    //
+    // 这几个接口只有 PLATFORM_ADMIN 能调（服务端按 token 里的角色判）。
+    // 「管哪一个服务商」是路径参数（provider_id），**身份不传**——
+    // 客户端自报身份等于自己挑身份（R1）。
+    // -----------------------------------------------------------------
+
+    /**
+     * 服务商列表（平台侧，全部服务商）。
+     *
+     * `status` 省略表示不按状态过滤。
+     */
+    listPlatformProviders(
+      params: QueryParamsOf<ListPlatformProvidersOp> = {},
+    ): Promise<ResponseOf<ListPlatformProvidersOp>> {
+      return send<ListPlatformProvidersOp>("GET", "/api/v1/platform/providers", {
+        query: {
+          status: params.status ?? undefined,
+          page: params.page,
+          limit: params.limit,
+        },
+      });
+    },
+
+    /**
+     * 新建服务商（初始状态「待审核」，状态不由请求体决定）。
+     */
+    createProvider(
+      body: RequestBodyOf<CreatePlatformProviderOp>,
+    ): Promise<ResponseOf<CreatePlatformProviderOp>> {
+      return send<CreatePlatformProviderOp>("POST", "/api/v1/platform/providers", { body });
+    },
+
+    /**
+     * 改服务商状态（审核通过 / 冻结 / 解冻）。
+     *
+     * 当前状态不允许这次流转时服务端返回 409。
+     */
+    updateProviderStatus(
+      params: PathParamsOf<UpdatePlatformProviderStatusOp>,
+      body: RequestBodyOf<UpdatePlatformProviderStatusOp>,
+    ): Promise<ResponseOf<UpdatePlatformProviderStatusOp>> {
+      return send<UpdatePlatformProviderStatusOp>(
+        "PATCH",
+        `/api/v1/platform/providers/${encodeURIComponent(String(params.provider_id))}`,
+        { body },
+      );
+    },
+
+    /**
+     * 给某个服务商建管理员账号（入参只有手机号）。
+     *
+     * 手机号已被占用时服务端返回 409。
+     */
+    createProviderAdmin(
+      params: PathParamsOf<CreatePlatformProviderAdminOp>,
+      body: RequestBodyOf<CreatePlatformProviderAdminOp>,
+    ): Promise<ResponseOf<CreatePlatformProviderAdminOp>> {
+      return send<CreatePlatformProviderAdminOp>(
+        "POST",
+        `/api/v1/platform/providers/${encodeURIComponent(String(params.provider_id))}/admin`,
+        { body },
+      );
     },
 
     // -----------------------------------------------------------------

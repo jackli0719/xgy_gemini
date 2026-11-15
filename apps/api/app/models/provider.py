@@ -35,8 +35,11 @@ class ServiceProvider(Base, TimestampMixin):
     status: Mapped[ProviderStatus] = mapped_column(
         pg_enum(ProviderStatus, "provider_status"),
         nullable=False,
-        default=ProviderStatus.ACTIVE,
-        server_default=ProviderStatus.ACTIVE.value,
+        # 新建的服务商一律「待审核」：平台建完还要审核（审核通过才转 ACTIVE），
+        # 默认值给成 ACTIVE 等于默认放行，审核这一步就没了。
+        # 迁移 0007 同步改了库里的列默认值，两条建库路径必须一致。
+        default=ProviderStatus.PENDING,
+        server_default=ProviderStatus.PENDING.value,
     )
     # 佣金比例，0 ~ 1（不是金额，故不用 decimal(12,2)）
     commission_rate: Mapped[Decimal] = mapped_column(

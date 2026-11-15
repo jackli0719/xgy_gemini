@@ -9,10 +9,18 @@ import { createMemoryHistory, type Router } from "vue-router";
 import { expect, vi } from "vitest";
 
 import { createAppRouter } from "@/router";
+import type { CurrentUser } from "@/stores/session";
 
 export interface SetupOptions {
   /** 是否预置 token（默认预置）。不预置时路由守卫会跳到「请先登录」。 */
   token?: string;
+  /**
+   * 预置当前登录用户（默认不预置）。
+   *
+   * 有角色门槛的页面（``meta.requiresRole``）靠它过守卫：
+   * 守卫读的是会话 store 里的 role，而 store 是从 localStorage 读的。
+   */
+  currentUser?: CurrentUser;
 }
 
 export interface SetupResult {
@@ -34,6 +42,11 @@ export async function setupApp(
     localStorage.setItem("oto.web.token", token);
   } else {
     localStorage.removeItem("oto.web.token");
+  }
+  if (options.currentUser) {
+    localStorage.setItem("oto.web.currentUser", JSON.stringify(options.currentUser));
+  } else {
+    localStorage.removeItem("oto.web.currentUser");
   }
 
   const pinia = createPinia();

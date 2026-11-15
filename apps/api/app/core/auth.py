@@ -42,6 +42,7 @@ __all__ = [
     "is_provider_role",
     "is_valid_role_provider_pair",
     "require_master_scope",
+    "require_platform_admin",
     "require_provider_scope",
 ]
 
@@ -200,6 +201,25 @@ async def require_master_scope(
     依赖层不查库——鉴权路径不该绑上数据库可用性。
     """
     if current.role is not UserRole.MASTER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=FORBIDDEN_DETAIL,
+        )
+    return current
+
+
+async def require_platform_admin(
+    current: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """FastAPI 依赖：要求当前用户是平台管理员（PLATFORM_ADMIN 角色）。
+
+    通过条件：角色是 PLATFORM_ADMIN。不满足 -> 403 Forbidden，
+    消息与别处的越权失败一致（不区分「角色不对」还是「没带归属」）。
+
+    平台侧角色按数据库约束（ck_user_role_provider）**不带 provider_id**：
+    平台管理员不属于任何一家服务商，租户隔离对它没有意义。
+    """
+    if current.role is not UserRole.PLATFORM_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=FORBIDDEN_DETAIL,

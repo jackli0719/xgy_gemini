@@ -1580,6 +1580,302 @@
         }
       }
     },
+    "/api/v1/platform/providers": {
+      "get": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "服务商列表（平台侧，分页）",
+        "description": "列出平台侧可见的全部服务商。",
+        "operationId": "list_platform_providers_api_v1_platform_providers_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ProviderStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按状态过滤，不传=全部",
+              "title": "Status"
+            },
+            "description": "按状态过滤，不传=全部"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "每页条数，默认 20，上限 100（超过按 100 算）",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，默认 20，上限 100（超过按 100 算）"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProviderListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "新建服务商（初始状态：待审核）",
+        "description": "建一个服务商，初始状态是「待审核」（PENDING）。\n\n状态**不由请求体决定**：新建一律待审核，要审核通过再调改状态接口。",
+        "operationId": "create_platform_provider_api_v1_platform_providers_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProviderItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/providers/{provider_id}": {
+      "patch": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "改服务商状态（审核通过 / 冻结 / 解冻）",
+        "description": "把服务商改成指定状态。\n\n当前状态不允许这次流转 -> 409（条件 UPDATE 没命中）。\n服务商不存在 -> 404。",
+        "operationId": "update_platform_provider_status_api_v1_platform_providers__provider_id__patch",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "服务商 ID",
+              "title": "Provider Id"
+            },
+            "description": "服务商 ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderStatusRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformProviderItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/providers/{provider_id}/admin": {
+      "post": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "给服务商建管理员账号",
+        "description": "给某个服务商建一个 PROVIDER_ADMIN 账号（入参只有手机号）。\n\n手机号已被占用 -> 409「手机号已注册」。",
+        "operationId": "create_platform_provider_admin_api_v1_platform_providers__provider_id__admin_post",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "服务商 ID",
+              "title": "Provider Id"
+            },
+            "description": "服务商 ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderAdminRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderAdminItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -1864,6 +2160,64 @@
         ],
         "title": "ConfirmSettlementResult",
         "description": "确认结算后的结算单状态。"
+      },
+      "CreateProviderAdminRequest": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "pattern": "^[0-9]{6,20}$",
+            "title": "Phone",
+            "description": "管理员登录用的手机号（纯数字）"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phone"
+        ],
+        "title": "CreateProviderAdminRequest",
+        "description": "给某个服务商建管理员账号的请求体。\n\n**只有手机号**：账号的角色（PROVIDER_ADMIN）与归属（provider_id）\n都由服务端按路径与规则填，客户端说了不算。"
+      },
+      "CreateProviderRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "description": "服务商名称"
+          },
+          "contact_phone": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Contact Phone",
+            "description": "联系电话"
+          },
+          "commission_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Commission Rate",
+            "description": "佣金比例（0~1，例如 0.15 表示 15%）"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "contact_phone",
+          "commission_rate"
+        ],
+        "title": "CreateProviderRequest",
+        "description": "新建服务商的请求体。\n\n**只有这三个字段**：服务商归属（也就是「归谁管」）由平台侧决定，\n不在请求体里；状态也不在——新建一律「待审核」（PENDING），\n要审核通过再调改状态接口。"
       },
       "DispatchRequest": {
         "properties": {
@@ -2616,6 +2970,129 @@
         "title": "PlaceOrderRequest",
         "description": "下单请求体。\n\n字段集合就是 ``{item_id, slot_id, address_id}``，多一个少一个都算破坏契约\n（有测试盯着）。"
       },
+      "PlatformProviderItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "服务商 ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "服务商名称"
+          },
+          "contact_phone": {
+            "type": "string",
+            "title": "Contact Phone",
+            "description": "联系电话"
+          },
+          "commission_rate": {
+            "type": "string",
+            "title": "Commission Rate",
+            "description": "佣金比例（0~1）"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProviderStatus",
+            "description": "服务商状态"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "建档时间"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "contact_phone",
+          "commission_rate",
+          "status",
+          "created_at"
+        ],
+        "title": "PlatformProviderItem",
+        "description": "平台侧看到的一条服务商。"
+      },
+      "PlatformProviderListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformProviderItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "当前页的服务商"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "符合条件的服务商总数（不受分页影响）"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "当前页码（从 1 开始）"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "本次生效的每页条数（上限 100）"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "PlatformProviderListResponse",
+        "description": "服务商列表（一页 + 总数）。"
+      },
+      "ProviderAdminItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "用户 ID"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "登录手机号"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole",
+            "description": "用户角色（PROVIDER_ADMIN）"
+          },
+          "provider_id": {
+            "type": "integer",
+            "title": "Provider Id",
+            "description": "归属的服务商 ID"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "建号时间"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "phone",
+          "role",
+          "provider_id",
+          "created_at"
+        ],
+        "title": "ProviderAdminItem",
+        "description": "刚建出来的服务商管理员账号。"
+      },
       "ProviderMasterItem": {
         "properties": {
           "id": {
@@ -2794,6 +3271,18 @@
         "title": "ProviderOrderListResponse",
         "description": "待派单列表（一页 + 总数）。\n\n带 total 是因为前端要显示「共 N 条」；只回一个数组的话，\n客户端只能靠「这页有没有满 limit」去猜还有没有下一页。"
       },
+      "ProviderStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "ACTIVE",
+          "FROZEN",
+          "SUSPENDED",
+          "CLOSED"
+        ],
+        "title": "ProviderStatus",
+        "description": "服务商状态。\n\n- ``PENDING``：待审核。平台侧刚建出来的初始状态，审核通过后转 ACTIVE；\n- ``ACTIVE``：正常营业；\n- ``FROZEN``：被平台冻结（不能接新单，但已有订单还要继续处理）。\n\n``SUSPENDED`` / ``CLOSED`` 是早期设计的停用 / 关停取值，**现在已废弃**：\n全仓库没有任何代码写这两个值。但 PostgreSQL 的枚举取值删不掉\n（见迁移 0007），所以它们仍然留在类型里——留着是为了让\n「create_all 建的测试库」与「alembic 建的开发库」枚举取值集合一致。\n\n**取值顺序与迁移建出来的库不一样**：迁移 0001 建的是\n(ACTIVE, SUSPENDED, CLOSED)，0007 追加的是 (PENDING, FROZEN)，\n而这里是按业务含义排的。PostgreSQL 的枚举排序按「取值在类型里的\n先后」，所以**不要按 status 排序**（列表接口按 id 排，见\napp.services.platform_provider.list_providers）。"
+      },
       "RejectRequest": {
         "properties": {
           "reason": {
@@ -2930,6 +3419,15 @@
         "title": "SettableMasterStatus",
         "description": "服务商可以设置的师傅状态。\n\n比 ``MasterStatus`` 少一个 ``PENDING``：PENDING 是入驻流程的初始状态\n（师傅已登记、还没通过审核），由平台侧的入驻卡产生。服务商不能把它\n写回去——否则一个没通过审核的师傅会重新变成「可派单」的状态。\n\n放在这里（而不是 schema 层）是因为它不是「接口长什么样」，而是\n**业务规则**：哪些状态允许被设置，service 也要按同一份判断，\n不能只靠请求体校验拦一道。"
       },
+      "SettableProviderStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "FROZEN"
+        ],
+        "title": "SettableProviderStatus",
+        "description": "平台侧可以把服务商置成的状态。\n\n比 ``ProviderStatus`` 少了 ``PENDING``：PENDING 是建号时的初始状态，\n平台不能把服务商改回待审核（那等于让审核白做）。\n也没带上两个废弃取值。\n\n放在这里（而不是 schema 层）是因为它不是「接口长什么样」，而是\n**业务规则**：哪些状态允许被设置，service 也要按同一份判断，\n不能只靠请求体校验拦一道（与 ``SettableMasterStatus`` 同一思路）。"
+      },
       "SettlementStatus": {
         "type": "string",
         "enum": [
@@ -3014,6 +3512,21 @@
         ],
         "title": "UpdateMasterStatusRequest",
         "description": "改师傅状态的请求体。\n\n**只有 status 一个字段**：master_id 从路径来，服务商归属从 token 来。\n带上别的字段（比如 provider_id）会被 ``extra=\"forbid\"`` 直接 422，\n而不是被静默忽略——静默忽略会让人以为字段生效了。\n\n``status`` 用的是**窄枚举** ``SettableMasterStatus``（少了 PENDING），\n所以接口这一层就把「PENDING 不许设置」变成 422。\n但这只是一道防线：service 那边按同一份枚举再挡一次\n（见 app.services.master_management），免得有人绕过接口层直接调 service。"
+      },
+      "UpdateProviderStatusRequest": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SettableProviderStatus",
+            "description": "要把服务商改成什么状态"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "UpdateProviderStatusRequest",
+        "description": "改服务商状态的请求体。\n\n``status`` 用的是**窄枚举** ``SettableProviderStatus``（ACTIVE / FROZEN），\n所以接口这一层就把「PENDING 不许设置」变成 422。\n但这只是一道防线：service 那边按同一份枚举再挡一次\n（见 app.services.platform_provider），免得有人绕过接口层直接调 service。"
       },
       "UserRole": {
         "type": "string",

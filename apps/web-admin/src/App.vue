@@ -32,6 +32,15 @@ function logout(): void {
       <nav class="app-nav" data-test="app-nav">
         <router-link class="app-nav-link" to="/provider/dispatch">派单</router-link>
         <router-link class="app-nav-link" to="/provider/masters">师傅管理</router-link>
+        <!-- 平台侧菜单：只有平台管理员看得到（真正的边界在后端 403） -->
+        <router-link
+          v-if="session.isPlatformAdmin"
+          class="app-nav-link"
+          data-test="platform-providers-link"
+          to="/platform/providers"
+        >
+          服务商管理
+        </router-link>
       </nav>
       <div v-if="session.isLoggedIn" class="app-user">
         <span data-test="current-user">

@@ -30,6 +30,11 @@ __all__ = [
     "OrderNoConflictError",
     "OrderNotFoundError",
     "PlaceOrderError",
+    "PlatformProviderConflictError",
+    "PlatformProviderError",
+    "PlatformProviderForbiddenError",
+    "PlatformProviderNotFoundError",
+    "PlatformProviderStatusNotSettableError",
     "ServiceFlowError",
     "ServiceFlowForbiddenError",
     "ServiceFlowInvariantError",
@@ -298,3 +303,47 @@ class CatalogNotFoundError(CatalogError):
     「不存在」与「已停用」共用同一个异常、同一句话——
     否则调用方能靠报错差异探测某个品类存不存在、是不是下架了。
     """
+
+
+class PlatformProviderError(Exception):
+    """平台侧服务商管理失败的业务异常基类。
+
+    与前面六棵异常树平级：平台侧管服务商（入驻 / 冻结 / 建管理员账号）
+    是一条独立链路，共用一个基类会让别的链路的兜底文案套到它头上。
+    """
+
+
+class PlatformProviderNotFoundError(PlatformProviderError):
+    """服务商不存在。
+
+    平台侧是「管理所有服务商」，不存在与「不属于我」不是一回事：
+    平台管理员能看全部服务商，所以这里只有「真的不存在」这一种。
+    """
+
+
+class PlatformProviderConflictError(PlatformProviderError):
+    """服务商状态冲突，或手机号已被占用。
+
+    两种情况都是 409：「换个状态再来」或「换个手机号」是可行的应对：
+
+    - 状态冲突：条件 UPDATE 没命中（当前状态不允许这次流转，
+      或者等锁期间状态被别人改了）；
+    - 手机号已占用：这个手机号已经有账号了。
+    """
+
+
+class PlatformProviderForbiddenError(PlatformProviderError):
+    """当前账号不能管理服务商。
+
+    典型场景：角色不是 PLATFORM_ADMIN。正常情况下依赖层
+    （``require_platform_admin``）已经挡住了，这里是 service 层的兜底。
+    """
+
+
+class PlatformProviderStatusNotSettableError(PlatformProviderError):
+    """这个状态不允许被设置。
+
+    PENDING（待审核）是建档时的初始状态，平台不能把服务商改回待审核；
+    两个废弃取值同理。客户端改请求内容才可能解决 -> 400，不是 409。
+    """
+
