@@ -797,6 +797,68 @@
         }
       }
     },
+    "/api/v1/items/{item_id}": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "单个服务项",
+        "description": "返回单个服务项的详情（名称 / 基准价 / 时长）。\n\n服务项不存在或已停用 -> 404（「不存在」与「已停用」共用一句话）。",
+        "operationId": "get_item_api_v1_items__item_id__get",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "服务项 ID",
+              "title": "Item Id"
+            },
+            "description": "服务项 ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceItemSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/items/{item_id}/slots": {
       "get": {
         "tags": [
@@ -874,6 +936,285 @@
           }
         }
       }
+    },
+    "/api/v1/addresses": {
+      "get": {
+        "tags": [
+          "addresses"
+        ],
+        "summary": "我的地址列表",
+        "description": "返回当前用户的全部地址（按创建顺序）。",
+        "operationId": "list_addresses_api_v1_addresses_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AddressResponse"
+                  },
+                  "title": "Response List Addresses Api V1 Addresses Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "addresses"
+        ],
+        "summary": "新建地址",
+        "description": "新建一条属于当前用户的地址。",
+        "operationId": "create_address_api_v1_addresses_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/addresses/{address_id}": {
+      "put": {
+        "tags": [
+          "addresses"
+        ],
+        "summary": "修改地址",
+        "description": "修改当前用户的某条地址（整体替换四个字段）。\n\n地址不存在或不属于当前用户 -> 404（两种情况同构）。",
+        "operationId": "update_address_api_v1_addresses__address_id__put",
+        "parameters": [
+          {
+            "name": "address_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "地址 ID",
+              "title": "Address Id"
+            },
+            "description": "地址 ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "addresses"
+        ],
+        "summary": "删除地址",
+        "description": "删除当前用户的某条地址。\n\n地址不存在或不属于当前用户 -> 404（两种情况同构）。",
+        "operationId": "delete_address_api_v1_addresses__address_id__delete",
+        "parameters": [
+          {
+            "name": "address_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "地址 ID",
+              "title": "Address Id"
+            },
+            "description": "地址 ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "手机号 + 验证码登录",
+        "description": "用手机号和验证码登录，返回访问令牌。\n\n手机号没注册过会自动建号（C 端「登录即注册」）。",
+        "operationId": "login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -904,6 +1245,130 @@
         ],
         "title": "AcceptResult",
         "description": "接单成功后的结果。"
+      },
+      "AddressCreateRequest": {
+        "properties": {
+          "contact": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Contact",
+            "description": "联系人"
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Phone",
+            "description": "联系电话"
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Region",
+            "description": "省市区"
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "description": "详细地址"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contact",
+          "phone",
+          "region",
+          "detail"
+        ],
+        "title": "AddressCreateRequest",
+        "description": "新建地址的请求体。\n\n字段集合就是「联系人 / 电话 / 地区 / 详细地址」四个，多一个少一个都算破坏契约。"
+      },
+      "AddressResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "地址 ID"
+          },
+          "contact": {
+            "type": "string",
+            "title": "Contact",
+            "description": "联系人"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "联系电话"
+          },
+          "region": {
+            "type": "string",
+            "title": "Region",
+            "description": "省市区"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "详细地址"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "contact",
+          "phone",
+          "region",
+          "detail"
+        ],
+        "title": "AddressResponse",
+        "description": "一条收货地址。"
+      },
+      "AddressUpdateRequest": {
+        "properties": {
+          "contact": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Contact",
+            "description": "联系人"
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Phone",
+            "description": "联系电话"
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Region",
+            "description": "省市区"
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "description": "详细地址"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "contact",
+          "phone",
+          "region",
+          "detail"
+        ],
+        "title": "AddressUpdateRequest",
+        "description": "修改地址的请求体。\n\nPUT 是**整体替换**：四个字段都要给全，不用给就说明客户端以为它是增量更新，\n那就该用 PATCH。与新建同构，所以直接继承新建的字段定义。"
       },
       "CategoryNode": {
         "properties": {
@@ -1050,6 +1515,88 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "LoginRequest": {
+        "properties": {
+          "phone": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 6,
+            "pattern": "^[0-9]{6,20}$",
+            "title": "Phone",
+            "description": "手机号（纯数字）"
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Code",
+            "description": "短信验证码（MVP 写死，见 settings.login_sms_code）"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "phone",
+          "code"
+        ],
+        "title": "LoginRequest",
+        "description": "手机号 + 验证码登录。"
+      },
+      "LoginResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token",
+            "description": "访问令牌（HS256 JWT）"
+          },
+          "token_type": {
+            "type": "string",
+            "title": "Token Type",
+            "description": "令牌类型",
+            "default": "bearer"
+          },
+          "user": {
+            "$ref": "#/components/schemas/LoginUser",
+            "description": "当前用户"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "access_token",
+          "user"
+        ],
+        "title": "LoginResponse",
+        "description": "登录成功：给 token 和用户信息。"
+      },
+      "LoginUser": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "用户 ID"
+          },
+          "nickname": {
+            "type": "string",
+            "title": "Nickname",
+            "description": "昵称"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "手机号"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "nickname",
+          "phone"
+        ],
+        "title": "LoginUser",
+        "description": "登录用户的基本信息（不含任何归属信息）。"
       },
       "MockPayNotifyRequest": {
         "properties": {

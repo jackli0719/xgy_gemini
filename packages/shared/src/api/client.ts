@@ -27,8 +27,8 @@ export type PayStatus = Schemas["PayStatus"];
 /** 结算单状态。 */
 export type SettlementStatus = Schemas["SettlementStatus"];
 
-/** 成功状态码：下单是 201，其余业务动作是 200。 */
-type SuccessStatus = 200 | 201;
+/** 成功状态码：下单是 201，其余业务动作是 200，删除是 204（无响应体）。 */
+type SuccessStatus = 200 | 201 | 204;
 
 /** 取某个 operation 的路径参数。 */
 export type PathParamsOf<Op> = Op extends { parameters: { path: infer P } } ? P : Record<string, never>;
@@ -45,13 +45,19 @@ export type RequestBodyOf<Op> = Op extends {
   ? B
   : never;
 
+/**
+ * 取某个响应里的 JSON 响应体类型。
+ *
+ * 没有响应体（204 之类）时是 void——不是 unknown：
+ * unknown 会让「这个接口到底返回什么」变成一问三不知，调用方只能瞎转。
+ */
+type JsonBodyOf<S> = S extends { content: { "application/json": infer B } }
+  ? B
+  : void;
+
 /** 取某个 operation 成功响应的 JSON 类型。 */
 export type ResponseOf<Op> = Op extends { responses: infer R }
-  ? { [K in keyof R]: K extends SuccessStatus ? R[K] : never }[keyof R] extends {
-      content: { "application/json": infer B };
-    }
-    ? B
-    : never
+  ? JsonBodyOf<{ [K in keyof R]: K extends SuccessStatus ? R[K] : never }[keyof R]>
   : never;
 
 export class ApiError extends Error {
@@ -94,8 +100,14 @@ type MockPayNotifyOp = operations["mock_pay_notify_api_v1_pay_mock_notify_post"]
 type ListCategoriesOp = operations["list_categories_api_v1_catalog_get"];
 type ListCategoryItemsOp = operations["list_category_items_api_v1_catalog__category_id__items_get"];
 type ListItemSlotsOp = operations["list_item_slots_api_v1_items__item_id__slots_get"];
+type GetItemOp = operations["get_item_api_v1_items__item_id__get"];
 type ListMyOrdersOp = operations["list_my_orders_api_v1_orders_get"];
 type GetMyOrderOp = operations["get_my_order_api_v1_orders__order_no__get"];
+type ListAddressesOp = operations["list_addresses_api_v1_addresses_get"];
+type CreateAddressOp = operations["create_address_api_v1_addresses_post"];
+type UpdateAddressOp = operations["update_address_api_v1_addresses__address_id__put"];
+type DeleteAddressOp = operations["delete_address_api_v1_addresses__address_id__delete"];
+type LoginOp = operations["login_api_v1_auth_login_post"];
 
 /** 从错误响应体里挑出文案。 */
 function detailOf(body: unknown): string | undefined {
@@ -299,6 +311,66 @@ export function createApiClient(options: ApiClientOptions = {}) {
         "GET",
         `/api/v1/orders/${encodeURIComponent(params.order_no)}`,
       );
+    },
+
+    /** 单个服务项（名称 / 基准价 / 时长）。 */
+    getItem(params: PathParamsOf<GetItemOp>): Promise<ResponseOf<GetItemOp>> {
+      return send<GetItemOp>(
+        "GET",
+        `/api/v1/items/${encodeURIComponent(String(params.item_id))}`,
+      );
+    },
+
+    // -----------------------------------------------------------------
+    // 收货地址
+    //
+    // 地址归属由服务端按 token 决定：这里不传 user_id，
+    // 也拿不到别人的地址（改 / 删别人的地址会得到 404）。
+    // -----------------------------------------------------------------
+
+    /** 我的地址列表。 */
+    listAddresses(): Promise<ResponseOf<ListAddressesOp>> {
+      return send<ListAddressesOp>("GET", "/api/v1/addresses");
+    },
+
+    /** 新建地址。 */
+    createAddress(
+      body: RequestBodyOf<CreateAddressOp>,
+    ): Promise<ResponseOf<CreateAddressOp>> {
+      return send<CreateAddressOp>("POST", "/api/v1/addresses", { body });
+    },
+
+    /** 修改地址（整体替换四个字段）。 */
+    updateAddress(
+      params: PathParamsOf<UpdateAddressOp>,
+      body: RequestBodyOf<UpdateAddressOp>,
+    ): Promise<ResponseOf<UpdateAddressOp>> {
+      return send<UpdateAddressOp>(
+        "PUT",
+        `/api/v1/addresses/${encodeURIComponent(String(params.address_id))}`,
+        { body },
+      );
+    },
+
+    /** 删除地址（204，没有响应体）。 */
+    deleteAddress(params: PathParamsOf<DeleteAddressOp>): Promise<void> {
+      return send<DeleteAddressOp>(
+        "DELETE",
+        `/api/v1/addresses/${encodeURIComponent(String(params.address_id))}`,
+      );
+    },
+
+    // -----------------------------------------------------------------
+    // 登录
+    // -----------------------------------------------------------------
+
+    /**
+     * 手机号 + 验证码登录。
+     *
+     * 整个 H5 里**只有这一个接口不需要 token**（它本身就是拿 token 的入口）。
+     */
+    login(body: RequestBodyOf<LoginOp>): Promise<ResponseOf<LoginOp>> {
+      return send<LoginOp>("POST", "/api/v1/auth/login", { body });
     },
 
     /**

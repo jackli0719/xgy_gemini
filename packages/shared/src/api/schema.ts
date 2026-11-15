@@ -264,6 +264,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 单个服务项
+         * @description 返回单个服务项的详情（名称 / 基准价 / 时长）。
+         *
+         *     服务项不存在或已停用 -> 404（「不存在」与「已停用」共用一句话）。
+         */
+        get: operations["get_item_api_v1_items__item_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/items/{item_id}/slots": {
         parameters: {
             query?: never;
@@ -281,6 +303,80 @@ export interface paths {
         get: operations["list_item_slots_api_v1_items__item_id__slots_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我的地址列表
+         * @description 返回当前用户的全部地址（按创建顺序）。
+         */
+        get: operations["list_addresses_api_v1_addresses_get"];
+        put?: never;
+        /**
+         * 新建地址
+         * @description 新建一条属于当前用户的地址。
+         */
+        post: operations["create_address_api_v1_addresses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/addresses/{address_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 修改地址
+         * @description 修改当前用户的某条地址（整体替换四个字段）。
+         *
+         *     地址不存在或不属于当前用户 -> 404（两种情况同构）。
+         */
+        put: operations["update_address_api_v1_addresses__address_id__put"];
+        post?: never;
+        /**
+         * 删除地址
+         * @description 删除当前用户的某条地址。
+         *
+         *     地址不存在或不属于当前用户 -> 404（两种情况同构）。
+         */
+        delete: operations["delete_address_api_v1_addresses__address_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手机号 + 验证码登录
+         * @description 用手机号和验证码登录，返回访问令牌。
+         *
+         *     手机号没注册过会自动建号（C 端「登录即注册」）。
+         */
+        post: operations["login_api_v1_auth_login_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -308,6 +404,94 @@ export interface components {
              * @description 承接订单的师傅 ID
              */
             master_id: number;
+        };
+        /**
+         * AddressCreateRequest
+         * @description 新建地址的请求体。
+         *
+         *     字段集合就是「联系人 / 电话 / 地区 / 详细地址」四个，多一个少一个都算破坏契约。
+         */
+        AddressCreateRequest: {
+            /**
+             * Contact
+             * @description 联系人
+             */
+            contact: string;
+            /**
+             * Phone
+             * @description 联系电话
+             */
+            phone: string;
+            /**
+             * Region
+             * @description 省市区
+             */
+            region: string;
+            /**
+             * Detail
+             * @description 详细地址
+             */
+            detail: string;
+        };
+        /**
+         * AddressResponse
+         * @description 一条收货地址。
+         */
+        AddressResponse: {
+            /**
+             * Id
+             * @description 地址 ID
+             */
+            id: number;
+            /**
+             * Contact
+             * @description 联系人
+             */
+            contact: string;
+            /**
+             * Phone
+             * @description 联系电话
+             */
+            phone: string;
+            /**
+             * Region
+             * @description 省市区
+             */
+            region: string;
+            /**
+             * Detail
+             * @description 详细地址
+             */
+            detail: string;
+        };
+        /**
+         * AddressUpdateRequest
+         * @description 修改地址的请求体。
+         *
+         *     PUT 是**整体替换**：四个字段都要给全，不用给就说明客户端以为它是增量更新，
+         *     那就该用 PATCH。与新建同构，所以直接继承新建的字段定义。
+         */
+        AddressUpdateRequest: {
+            /**
+             * Contact
+             * @description 联系人
+             */
+            contact: string;
+            /**
+             * Phone
+             * @description 联系电话
+             */
+            phone: string;
+            /**
+             * Region
+             * @description 省市区
+             */
+            region: string;
+            /**
+             * Detail
+             * @description 详细地址
+             */
+            detail: string;
         };
         /**
          * CategoryNode
@@ -399,6 +583,62 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * LoginRequest
+         * @description 手机号 + 验证码登录。
+         */
+        LoginRequest: {
+            /**
+             * Phone
+             * @description 手机号（纯数字）
+             */
+            phone: string;
+            /**
+             * Code
+             * @description 短信验证码（MVP 写死，见 settings.login_sms_code）
+             */
+            code: string;
+        };
+        /**
+         * LoginResponse
+         * @description 登录成功：给 token 和用户信息。
+         */
+        LoginResponse: {
+            /**
+             * Access Token
+             * @description 访问令牌（HS256 JWT）
+             */
+            access_token: string;
+            /**
+             * Token Type
+             * @description 令牌类型
+             * @default bearer
+             */
+            token_type: string;
+            /** @description 当前用户 */
+            user: components["schemas"]["LoginUser"];
+        };
+        /**
+         * LoginUser
+         * @description 登录用户的基本信息（不含任何归属信息）。
+         */
+        LoginUser: {
+            /**
+             * Id
+             * @description 用户 ID
+             */
+            id: number;
+            /**
+             * Nickname
+             * @description 昵称
+             */
+            nickname: string;
+            /**
+             * Phone
+             * @description 手机号
+             */
+            phone: string;
         };
         /**
          * MockPayNotifyRequest
@@ -1234,6 +1474,40 @@ export interface operations {
             };
         };
     };
+    get_item_api_v1_items__item_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 服务项 ID */
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceItemSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_item_slots_api_v1_items__item_id__slots_get: {
         parameters: {
             query: {
@@ -1258,6 +1532,175 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SlotAvailability"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_addresses_api_v1_addresses_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_address_api_v1_addresses_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_address_api_v1_addresses__address_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 地址 ID */
+                address_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddressUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_address_api_v1_addresses__address_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 地址 ID */
+                address_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    login_api_v1_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
                 };
             };
             /** @description Validation Error */

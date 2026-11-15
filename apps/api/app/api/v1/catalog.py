@@ -88,6 +88,30 @@ async def list_category_items(
 
 
 @router.get(
+    "/items/{item_id}",
+    response_model=ServiceItemSummary,
+    summary="单个服务项",
+)
+async def get_item(
+    item_id: int = Path(..., gt=0, description="服务项 ID"),
+    session: AsyncSession = Depends(get_session),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ServiceItemSummary:
+    """返回单个服务项的详情（名称 / 基准价 / 时长）。
+
+    服务项不存在或已停用 -> 404（「不存在」与「已停用」共用一句话）。
+    """
+    row = await user_queries.get_service_item(session, item_id=item_id)
+    return ServiceItemSummary(
+        id=row.id,
+        category_id=row.category_id,
+        name=row.name,
+        base_price=row.base_price,
+        duration_min=row.duration_min,
+    )
+
+
+@router.get(
     "/items/{item_id}/slots",
     response_model=list[SlotAvailability],
     summary="某服务项某天的可预约时段",

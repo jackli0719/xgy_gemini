@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     jwt_alg: str = "HS256"
     jwt_access_expire_minutes: int = 120
 
+    # 登录验证码。
+    #
+    # **MVP 占位**：不接短信网关，所有手机号都用这一个固定验证码登录。
+    # 接真实短信时把 service 里的比对换成「查短信记录 + 校验有效期 + 一次性作废」，
+    # 这个配置项就退休了。生产环境务必把它去掉或改成随机值——
+    # 留着就等于任何人都能用 123456 登录任何手机号。
+    login_sms_code: str = "123456"
+
     # 超时自动确认：订单停在「待确认」超过这个小时数就由系统自动确认
     # （见 app/services/auto_confirm.py）。0 或负数会让「立刻全部确认」，
     # 配置阶段直接拒绝。

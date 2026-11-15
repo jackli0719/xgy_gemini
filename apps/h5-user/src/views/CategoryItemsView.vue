@@ -7,6 +7,8 @@
  *   「今天及以后 且 还有余量」的时段（available > 0）。
  *
  * 「去预约」跳到 /order/new?itemId=&slotId=。
+ * 只带 id：下单页会自己按 itemId 去接口查服务项名，
+ * 不采信 query 里传的名称（query 是客户端可控的）。
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -64,7 +66,6 @@ function book(item: ServiceItemSummary, slot: SlotAvailability): void {
     query: {
       itemId: String(item.id),
       slotId: String(slot.id),
-      itemName: item.name,
       date: date.value,
     },
   });

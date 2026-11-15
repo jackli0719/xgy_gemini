@@ -1,18 +1,19 @@
 /**
- * 登录占位的守卫行为（卡片约束 C）。
+ * 路由守卫的行为。
  *
- * 本卡不写登录页：没有 token 时提示「请先登录」。
+ * 没有 token 时跳到登录页，并把原来要去的地方带在 redirect 上，
+ * 登录完再跳回去（登录页自己处理 redirect）。
  */
 import { describe, expect, it } from "vitest";
 
 import { setupApp } from "./helpers";
 
 describe("路由守卫", () => {
-  it("没有 token 时跳到「请先登录」", async () => {
+  it("没有 token 时跳到登录页", async () => {
     const { router } = await setupApp("/orders", { token: "" });
 
-    expect(router.currentRoute.value.name).toBe("need-login");
-    // 把原来要去的地方带过去，登录页上线后可以跳回来
+    expect(router.currentRoute.value.name).toBe("login");
+    // 把原来要去的地方带过去，登录完可以跳回来
     expect(router.currentRoute.value.query.redirect).toBe("/orders");
   });
 
@@ -20,5 +21,11 @@ describe("路由守卫", () => {
     const { router } = await setupApp("/orders");
 
     expect(router.currentRoute.value.path).toBe("/orders");
+  });
+
+  it("登录页本身不需要 token（否则拿不到 token）", async () => {
+    const { router } = await setupApp("/login", { token: "" });
+
+    expect(router.currentRoute.value.path).toBe("/login");
   });
 });

@@ -41,6 +41,7 @@ __all__ = [
     "OrderRow",
     "ServiceItemRow",
     "SlotRow",
+    "get_service_item",
     "get_user_order",
     "list_categories",
     "list_category_items",
@@ -231,6 +232,34 @@ async def list_category_items(
         )
         for item_id, item_category_id, name, base_price, duration_min in rows
     ]
+
+
+async def get_service_item(
+    session: AsyncSession, *, item_id: int
+) -> ServiceItemRow:
+    """返回单个服务项的详情。
+
+    服务项不存在或已停用 -> ItemNotFoundError（404）。
+    「不存在」与「已停用」共用一句话，不泄露服务项状态——
+    和列表接口的口径一致：目录里看不到的服务项，单独查也查不到。
+    """
+    row = (
+        await session.execute(
+            select(
+                ServiceItem.id,
+                ServiceItem.category_id,
+                ServiceItem.name,
+                ServiceItem.base_price,
+                ServiceItem.duration_min,
+            ).where(
+                ServiceItem.id == item_id,
+                ServiceItem.status == CatalogStatus.ACTIVE,
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        raise ItemNotFoundError(_ITEM_NOT_FOUND_DETAIL.format(item_id=item_id))
+    return ServiceItemRow(*row)
 
 
 async def list_item_slots(

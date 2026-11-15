@@ -15,6 +15,8 @@ export const mockClient = {
   listCategoryItems: vi.fn(),
   /** GET /api/v1/items/{item_id}/slots */
   listItemSlots: vi.fn(),
+  /** GET /api/v1/items/{item_id} */
+  getItem: vi.fn(),
   /** POST /api/v1/orders */
   placeOrder: vi.fn(),
   /** GET /api/v1/orders */
@@ -23,4 +25,14 @@ export const mockClient = {
   getMyOrder: vi.fn(),
   /** POST /api/v1/orders/{order_no}/confirm */
   confirmService: vi.fn(),
+  /** GET /api/v1/addresses */
+  listAddresses: vi.fn(),
+  /** POST /api/v1/addresses */
+  createAddress: vi.fn(),
+  /** PUT /api/v1/addresses/{address_id} */
+  updateAddress: vi.fn(),
+  /** DELETE /api/v1/addresses/{address_id} */
+  deleteAddress: vi.fn(),
+  /** POST /api/v1/auth/login */
+  login: vi.fn(),
 };

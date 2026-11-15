@@ -10,6 +10,7 @@
   <div class="app">
     <van-nav-bar title="OTO 家政">
       <template #right>
+        <router-link to="/addresses">地址</router-link>
         <router-link to="/orders">订单</router-link>
       </template>
     </van-nav-bar>

@@ -2,11 +2,12 @@
 /**
  * 下单页：选地址 + 选时段 + 提交下单。
  *
- * 路由：/order/new?itemId=&slotId=（itemName / date 可选，是列表页带过来的）
+ * 路由：/order/new?itemId=&slotId=（date 可选，是列表页带过来的）
  *
+ * - 服务项：api.getItem({ item_id })，**商品名不再靠 query 传**——
+ *   query 是客户端可控的，价格和名称都得以服务端返回的为准；
  * - 时段：api.listItemSlots({ item_id, date })，后端只返回还有余量的时段；
- * - 地址：**占位**。后端还没有「我的地址」接口，卡片允许本卡写死一个
- *   address_id（见 src/constants/addresses.ts）；
+ * - 地址：api.listAddresses()，没有地址就提示「请先添加地址」并挡住下单；
  * - 下单：api.placeOrder({ item_id, slot_id, address_id })，金额由服务端算，
  *   前端不传金额。
  *
@@ -16,42 +17,60 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api } from "@/api";
-import { PLACEHOLDER_ADDRESSES } from "@/constants/addresses";
 import { firstQuery } from "@/utils/query";
 import { todayStr } from "@/utils/date";
 import type { components } from "@oto/shared/api";
 
 type SlotAvailability = components["schemas"]["SlotAvailability"];
+type AddressResponse = components["schemas"]["AddressResponse"];
 
 const route = useRoute();
 const router = useRouter();
 
 const itemId = computed(() => Number(firstQuery(route.query.itemId) ?? 0));
-const itemName = computed(
-  () => firstQuery(route.query.itemName) ?? `服务项 #${itemId.value}`,
-);
 const date = ref(firstQuery(route.query.date) ?? todayStr());
 
 /** 列表页带过来的时段；没有就由本页让用户选。 */
 const slotId = ref(Number(firstQuery(route.query.slotId) ?? 0));
 
 const slots = ref<SlotAvailability[]>([]);
-/** 地址下拉：占位数据，字段与将来的地址接口保持一致（id / label）。 */
-const addressOptions = PLACEHOLDER_ADDRESSES.map((address) => ({
-  text: address.label,
-  value: address.id,
-}));
-const addressId = ref<number>(PLACEHOLDER_ADDRESSES[0].id);
+/** 服务项名称：来自接口，不是 query。 */
+const itemName = ref("");
+/** 我的地址：来自接口。 */
+const addresses = ref<AddressResponse[]>([]);
+const addressId = ref<number | null>(null);
 
 const loading = ref(true);
 const submitting = ref(false);
 const error = ref("");
 
-onMounted(loadSlots);
+const addressOptions = computed(() =>
+  addresses.value.map((address) => ({
+    text: `${address.contact} ${address.region} ${address.detail}`,
+    value: address.id,
+  })),
+);
 
-async function loadSlots(): Promise<void> {
+onMounted(load);
+
+async function load(): Promise<void> {
   loading.value = true;
   error.value = "";
+  await Promise.all([loadItem(), loadSlots(), loadAddresses()]);
+  loading.value = false;
+}
+
+async function loadItem(): Promise<void> {
+  try {
+    const item = await api.getItem({ item_id: itemId.value });
+    itemName.value = item.name;
+  } catch (err) {
+    itemName.value = `服务项 #${itemId.value}`;
+    error.value = err instanceof Error ? err.message : "服务项加载失败";
+  }
+}
+
+async function loadSlots(): Promise<void> {
   try {
     slots.value = await api.listItemSlots({
       item_id: itemId.value,
@@ -63,14 +82,26 @@ async function loadSlots(): Promise<void> {
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : "时段加载失败";
-  } finally {
-    loading.value = false;
+  }
+}
+
+async function loadAddresses(): Promise<void> {
+  try {
+    addresses.value = await api.listAddresses();
+    const first = addresses.value[0];
+    if (first) addressId.value = first.id;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : "地址加载失败";
   }
 }
 
 async function submit(): Promise<void> {
   if (!slotId.value) {
     error.value = "请选择预约时段";
+    return;
+  }
+  if (addressId.value === null) {
+    error.value = "请先添加地址";
     return;
   }
   submitting.value = true;
@@ -95,7 +126,7 @@ async function submit(): Promise<void> {
     <h2 class="page-title">确认预约</h2>
 
     <van-cell-group inset>
-      <van-cell title="服务项目" :value="itemName" />
+      <van-cell title="服务项目" :value="itemName" data-test="item-name" />
       <van-cell title="预约日期" :value="date" />
       <van-cell title="预约时段">
         <template #value>
@@ -121,7 +152,13 @@ async function submit(): Promise<void> {
 
     <div class="page-block">
       <p class="page-label">服务地址</p>
-      <van-dropdown-menu>
+      <van-empty
+        v-if="!loading && addresses.length === 0"
+        image="search"
+        description="请先添加地址"
+        data-test="no-address"
+      />
+      <van-dropdown-menu v-else>
         <van-dropdown-item
           v-model="addressId"
           :options="addressOptions"
@@ -137,6 +174,7 @@ async function submit(): Promise<void> {
         type="primary"
         block
         :loading="submitting"
+        :disabled="!loading && addresses.length === 0"
         data-test="submit-order"
         @click="submit"
       >

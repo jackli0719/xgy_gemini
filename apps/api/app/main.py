@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from app.api.v1.addresses import router as addresses_router
+from app.api.v1.auth import router as auth_router
 from app.api.v1.catalog import router as catalog_router
 from app.api.v1.dispatch import router as dispatch_router
 from app.api.v1.errors import (
@@ -43,6 +45,9 @@ app.include_router(dispatch_router)
 app.include_router(master_action_router)
 app.include_router(settlements_router)
 app.include_router(catalog_router)
+app.include_router(addresses_router)
+# 登录是唯一不需要 token 的业务接口（它本身就是拿 token 的入口）
+app.include_router(auth_router)
 
 # 异常映射：service / domain 的业务异常 -> HTTP 状态码。
 # 注册在两个基类上，子类按 MRO 自动命中（OrderNoConflictError 命中 503，
