@@ -70,5 +70,10 @@ async def login(
             id=result.user.id,
             nickname=result.user.nickname,
             phone=result.user.phone,
+            # 角色与归属跟 JWT 里的 claim 一致（同一个来源：user 表）。
+            # 回给客户端是为了让它知道「我是谁、属于哪个服务商」，
+            # 隔离本身仍然只认 token。
+            role=result.user.role,
+            provider_id=result.user.provider_id,
         ),
     )

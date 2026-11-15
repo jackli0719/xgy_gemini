@@ -1,0 +1,36 @@
+/* 后台全局样式：只做一点点基础排版，其余交给 Element Plus 默认样式。 */
+
+body {
+  margin: 0;
+  background-color: #f5f7fa;
+  font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", Arial, sans-serif;
+}
+
+.page {
+  padding: 16px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.error-text {
+  color: #f56c6c;
+  margin: 8px 0;
+}

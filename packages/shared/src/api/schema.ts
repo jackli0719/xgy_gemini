@@ -361,6 +361,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/provider/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 本商订单列表（默认待派单）
+         * @description 列出本商可见的、处于指定状态的订单。
+         *
+         *     待派单（PENDING_DISPATCH）时，可见范围 = 公共待派单池（还没归属的单）
+         *     + 本商专属（师傅拒单后退回本商的单）。可见范围与「能不能派」
+         *     是同一套条件（见 app.services.provider_queries）。
+         */
+        get: operations["list_provider_orders_api_v1_provider_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider/masters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 本商师傅列表
+         * @description 列出本商的师傅（id / 姓名 / 评分 / 状态）。
+         *
+         *     所有状态的师傅都返回（含停用 / 休假），由派单的人自己挑。
+         */
+        get: operations["list_provider_masters_api_v1_provider_masters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -621,7 +667,14 @@ export interface components {
         };
         /**
          * LoginUser
-         * @description 登录用户的基本信息（不含任何归属信息）。
+         * @description 登录用户的基本信息 + 身份归属。
+         *
+         *     ``role`` 与 ``provider_id`` 是**这个账号自己的**归属信息
+         *     （JWT 里带着同样的两个 claim），回给客户端是为了让它知道
+         *     「我是谁、我属于哪个服务商」——服务商端据此决定展示哪些菜单。
+         *
+         *     这不是「泄露别家的归属」：这里回的是登录者自己的信息。
+         *     租户隔离本身不靠这个字段，靠的是 token（见 app.core.auth）。
          */
         LoginUser: {
             /**
@@ -639,7 +692,20 @@ export interface components {
              * @description 手机号
              */
             phone: string;
+            /** @description 用户角色 */
+            role: components["schemas"]["UserRole"];
+            /**
+             * Provider Id
+             * @description 归属的服务商 ID；服务商侧角色才有值，其余角色为 null
+             */
+            provider_id: number | null;
         };
+        /**
+         * MasterStatus
+         * @description 师傅状态。
+         * @enum {string}
+         */
+        MasterStatus: "PENDING" | "ACTIVE" | "ON_LEAVE" | "DISABLED";
         /**
          * MockPayNotifyRequest
          * @description mock 支付回调的请求体。
@@ -869,6 +935,132 @@ export interface components {
             address_id: number;
         };
         /**
+         * ProviderMasterItem
+         * @description 本商师傅的一项。
+         *
+         *     ``rating`` 可以是空：还没被评价过的师傅没有分数。
+         */
+        ProviderMasterItem: {
+            /**
+             * Id
+             * @description 师傅 ID（派单接口用它）
+             */
+            id: number;
+            /**
+             * Real Name
+             * @description 师傅姓名
+             */
+            real_name: string;
+            /**
+             * Rating
+             * @description 评分（0~5，可空）
+             */
+            rating?: string | null;
+            /** @description 师傅状态 */
+            status: components["schemas"]["MasterStatus"];
+        };
+        /**
+         * ProviderMasterListResponse
+         * @description 本商师傅列表。
+         */
+        ProviderMasterListResponse: {
+            /**
+             * Items
+             * @description 师傅列表
+             */
+            items: components["schemas"]["ProviderMasterItem"][];
+            /**
+             * Total
+             * @description 师傅总数
+             */
+            total: number;
+        };
+        /**
+         * ProviderOrderItem
+         * @description 待派单列表里的一笔订单。
+         *
+         *     带 ``id``（数字主键）：派单接口 ``POST /orders/{order_id}/dispatch``
+         *     收的是数字 id，不是订单号——前端拿它拼 URL，不用再查一次。
+         */
+        ProviderOrderItem: {
+            /**
+             * Id
+             * @description 订单 ID（派单接口用它）
+             */
+            id: number;
+            /**
+             * Order No
+             * @description 订单号
+             */
+            order_no: string;
+            /** @description 订单状态 */
+            status: components["schemas"]["OrderStatus"];
+            /** @description 支付状态 */
+            pay_status: components["schemas"]["PayStatus"];
+            /**
+             * Amount
+             * @description 订单金额
+             */
+            amount: string;
+            /**
+             * Item Id
+             * @description 服务项 ID
+             */
+            item_id: number;
+            /**
+             * Item Name
+             * @description 服务项名称
+             */
+            item_name: string;
+            /**
+             * Slot Date
+             * Format: date
+             * @description 预约日期
+             */
+            slot_date: string;
+            /**
+             * Slot Start Time
+             * Format: time
+             * @description 预约开始时间
+             */
+            slot_start_time: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 下单时间
+             */
+            created_at: string;
+        };
+        /**
+         * ProviderOrderListResponse
+         * @description 待派单列表（一页 + 总数）。
+         *
+         *     带 total 是因为前端要显示「共 N 条」；只回一个数组的话，
+         *     客户端只能靠「这页有没有满 limit」去猜还有没有下一页。
+         */
+        ProviderOrderListResponse: {
+            /**
+             * Items
+             * @description 当前页的订单
+             */
+            items: components["schemas"]["ProviderOrderItem"][];
+            /**
+             * Total
+             * @description 符合条件的订单总数（不受分页影响）
+             */
+            total: number;
+            /**
+             * Limit
+             * @description 本次生效的每页条数（上限 100）
+             */
+            limit: number;
+            /**
+             * Offset
+             * @description 本次跳过的条数
+             */
+            offset: number;
+        };
+        /**
          * RejectRequest
          * @description 拒单请求体。
          */
@@ -1010,6 +1202,20 @@ export interface components {
              */
             available: number;
         };
+        /**
+         * UserRole
+         * @description 用户角色。
+         *
+         *     角色与「是否归属某个服务商」强绑定：只有 PROVIDER_ADMIN / PROVIDER_STAFF
+         *     带 provider_id，其余角色必须没有（数据库 CHECK 约束 ck_user_role_provider 强制）。
+         *
+         *     注意 MASTER（师傅）：师傅的归属权威来源是 master 表，不是 user.provider_id。
+         *     一个师傅可能同时是某个服务商的管理员，但「这个用户对应哪个师傅身份」
+         *     只能查 master 表——user.provider_id 记的是**登录账号**的服务商归属，
+         *     与师傅身份是两回事。技术债：两者没有在模型层做一致性校验。
+         * @enum {string}
+         */
+        UserRole: "USER" | "MASTER" | "PROVIDER_ADMIN" | "PROVIDER_STAFF" | "PLATFORM_ADMIN" | "PLATFORM_OPS" | "PLATFORM_FINANCE" | "PLATFORM_CS";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1669,6 +1875,75 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_provider_orders_api_v1_provider_orders_get: {
+        parameters: {
+            query?: {
+                /** @description 按订单状态过滤，默认待派单（PENDING_DISPATCH） */
+                status?: components["schemas"]["OrderStatus"];
+                /** @description 每页条数，默认 20，上限 100（超过按 100 算） */
+                limit?: number;
+                /** @description 跳过的条数，默认 0 */
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderOrderListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_provider_masters_api_v1_provider_masters_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderMasterListResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

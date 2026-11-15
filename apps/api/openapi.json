@@ -1174,6 +1174,143 @@
         }
       }
     },
+    "/api/v1/provider/orders": {
+      "get": {
+        "tags": [
+          "provider"
+        ],
+        "summary": "本商订单列表（默认待派单）",
+        "description": "列出本商可见的、处于指定状态的订单。\n\n待派单（PENDING_DISPATCH）时，可见范围 = 公共待派单池（还没归属的单）\n+ 本商专属（师傅拒单后退回本商的单）。可见范围与「能不能派」\n是同一套条件（见 app.services.provider_queries）。",
+        "operationId": "list_provider_orders_api_v1_provider_orders_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/OrderStatus",
+              "description": "按订单状态过滤，默认待派单（PENDING_DISPATCH）",
+              "default": "PENDING_DISPATCH"
+            },
+            "description": "按订单状态过滤，默认待派单（PENDING_DISPATCH）"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "每页条数，默认 20，上限 100（超过按 100 算）",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，默认 20，上限 100（超过按 100 算）"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "跳过的条数，默认 0",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "跳过的条数，默认 0"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderOrderListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/provider/masters": {
+      "get": {
+        "tags": [
+          "provider"
+        ],
+        "summary": "本商师傅列表",
+        "description": "列出本商的师傅（id / 姓名 / 评分 / 状态）。\n\n所有状态的师傅都返回（含停用 / 休假），由派单的人自己挑。",
+        "operationId": "list_provider_masters_api_v1_provider_masters_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderMasterListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -1586,6 +1723,22 @@
             "type": "string",
             "title": "Phone",
             "description": "手机号"
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole",
+            "description": "用户角色"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id",
+            "description": "归属的服务商 ID；服务商侧角色才有值，其余角色为 null"
           }
         },
         "additionalProperties": false,
@@ -1593,10 +1746,23 @@
         "required": [
           "id",
           "nickname",
-          "phone"
+          "phone",
+          "role",
+          "provider_id"
         ],
         "title": "LoginUser",
-        "description": "登录用户的基本信息（不含任何归属信息）。"
+        "description": "登录用户的基本信息 + 身份归属。\n\n``role`` 与 ``provider_id`` 是**这个账号自己的**归属信息\n（JWT 里带着同样的两个 claim），回给客户端是为了让它知道\n「我是谁、我属于哪个服务商」——服务商端据此决定展示哪些菜单。\n\n这不是「泄露别家的归属」：这里回的是登录者自己的信息。\n租户隔离本身不靠这个字段，靠的是 token（见 app.core.auth）。"
+      },
+      "MasterStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "ACTIVE",
+          "ON_LEAVE",
+          "DISABLED"
+        ],
+        "title": "MasterStatus",
+        "description": "师傅状态。"
       },
       "MockPayNotifyRequest": {
         "properties": {
@@ -1925,6 +2091,178 @@
         "title": "PlaceOrderRequest",
         "description": "下单请求体。\n\n字段集合就是 ``{item_id, slot_id, address_id}``，多一个少一个都算破坏契约\n（有测试盯着）。"
       },
+      "ProviderMasterItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "师傅 ID（派单接口用它）"
+          },
+          "real_name": {
+            "type": "string",
+            "title": "Real Name",
+            "description": "师傅姓名"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating",
+            "description": "评分（0~5，可空）"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MasterStatus",
+            "description": "师傅状态"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "real_name",
+          "status"
+        ],
+        "title": "ProviderMasterItem",
+        "description": "本商师傅的一项。\n\n``rating`` 可以是空：还没被评价过的师傅没有分数。"
+      },
+      "ProviderMasterListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderMasterItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "师傅列表"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "师傅总数"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ProviderMasterListResponse",
+        "description": "本商师傅列表。"
+      },
+      "ProviderOrderItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "订单 ID（派单接口用它）"
+          },
+          "order_no": {
+            "type": "string",
+            "title": "Order No",
+            "description": "订单号"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus",
+            "description": "订单状态"
+          },
+          "pay_status": {
+            "$ref": "#/components/schemas/PayStatus",
+            "description": "支付状态"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount",
+            "description": "订单金额"
+          },
+          "item_id": {
+            "type": "integer",
+            "title": "Item Id",
+            "description": "服务项 ID"
+          },
+          "item_name": {
+            "type": "string",
+            "title": "Item Name",
+            "description": "服务项名称"
+          },
+          "slot_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Slot Date",
+            "description": "预约日期"
+          },
+          "slot_start_time": {
+            "type": "string",
+            "format": "time",
+            "title": "Slot Start Time",
+            "description": "预约开始时间"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "下单时间"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "order_no",
+          "status",
+          "pay_status",
+          "amount",
+          "item_id",
+          "item_name",
+          "slot_date",
+          "slot_start_time",
+          "created_at"
+        ],
+        "title": "ProviderOrderItem",
+        "description": "待派单列表里的一笔订单。\n\n带 ``id``（数字主键）：派单接口 ``POST /orders/{order_id}/dispatch``\n收的是数字 id，不是订单号——前端拿它拼 URL，不用再查一次。"
+      },
+      "ProviderOrderListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderOrderItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "当前页的订单"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "符合条件的订单总数（不受分页影响）"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "本次生效的每页条数（上限 100）"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset",
+            "description": "本次跳过的条数"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "ProviderOrderListResponse",
+        "description": "待派单列表（一页 + 总数）。\n\n带 total 是因为前端要显示「共 N 条」；只回一个数组的话，\n客户端只能靠「这页有没有满 limit」去猜还有没有下一页。"
+      },
       "RejectRequest": {
         "properties": {
           "reason": {
@@ -2120,6 +2458,21 @@
         ],
         "title": "SlotAvailability",
         "description": "某个时段的可预约情况。\n\n``available`` = capacity - used，只返回 available > 0 的时段。\n容量与已占用数一起返回，是为了让前端能显示「还剩几个」，\n而不是让前端自己算一遍（两边的口径容易不一致）。"
+      },
+      "UserRole": {
+        "type": "string",
+        "enum": [
+          "USER",
+          "MASTER",
+          "PROVIDER_ADMIN",
+          "PROVIDER_STAFF",
+          "PLATFORM_ADMIN",
+          "PLATFORM_OPS",
+          "PLATFORM_FINANCE",
+          "PLATFORM_CS"
+        ],
+        "title": "UserRole",
+        "description": "用户角色。\n\n角色与「是否归属某个服务商」强绑定：只有 PROVIDER_ADMIN / PROVIDER_STAFF\n带 provider_id，其余角色必须没有（数据库 CHECK 约束 ck_user_role_provider 强制）。\n\n注意 MASTER（师傅）：师傅的归属权威来源是 master 表，不是 user.provider_id。\n一个师傅可能同时是某个服务商的管理员，但「这个用户对应哪个师傅身份」\n只能查 master 表——user.provider_id 记的是**登录账号**的服务商归属，\n与师傅身份是两回事。技术债：两者没有在模型层做一致性校验。"
       },
       "ValidationError": {
         "properties": {

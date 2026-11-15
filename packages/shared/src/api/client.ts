@@ -108,6 +108,8 @@ type CreateAddressOp = operations["create_address_api_v1_addresses_post"];
 type UpdateAddressOp = operations["update_address_api_v1_addresses__address_id__put"];
 type DeleteAddressOp = operations["delete_address_api_v1_addresses__address_id__delete"];
 type LoginOp = operations["login_api_v1_auth_login_post"];
+type ListProviderOrdersOp = operations["list_provider_orders_api_v1_provider_orders_get"];
+type ListProviderMastersOp = operations["list_provider_masters_api_v1_provider_masters_get"];
 
 /** 从错误响应体里挑出文案。 */
 function detailOf(body: unknown): string | undefined {
@@ -319,6 +321,31 @@ export function createApiClient(options: ApiClientOptions = {}) {
         "GET",
         `/api/v1/items/${encodeURIComponent(String(params.item_id))}`,
       );
+    },
+
+    // -----------------------------------------------------------------
+    // 服务商侧
+    //
+    // 这两个接口**不传 provider_id**：服务端按 token 里的归属过滤，
+    // 客户端自报归属等于让它自己挑租户（R1）。
+    // -----------------------------------------------------------------
+
+    /**
+     * 本商订单列表（默认待派单）。
+     *
+     * `status` 省略时后端按 PENDING_DISPATCH 处理。
+     */
+    listProviderOrders(
+      params: QueryParamsOf<ListProviderOrdersOp> = {},
+    ): Promise<ResponseOf<ListProviderOrdersOp>> {
+      return send<ListProviderOrdersOp>("GET", "/api/v1/provider/orders", {
+        query: { status: params.status, limit: params.limit, offset: params.offset },
+      });
+    },
+
+    /** 本商师傅列表（id / 姓名 / 评分 / 状态）。 */
+    listProviderMasters(): Promise<ResponseOf<ListProviderMastersOp>> {
+      return send<ListProviderMastersOp>("GET", "/api/v1/provider/masters");
     },
 
     // -----------------------------------------------------------------

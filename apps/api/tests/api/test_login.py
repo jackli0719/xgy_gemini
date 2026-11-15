@@ -21,7 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.database import get_session
 from app.main import app
 from app.models.base import Base
-from app.models.enums import UserStatus
+from app.models.enums import UserRole, UserStatus
+from app.models.provider import ServiceProvider
 from app.models.user import User
 
 LOGIN_URL = "/api/v1/auth/login"
@@ -152,6 +153,42 @@ async def test_login_with_correct_code_returns_token(api_client, seeded) -> None
     assert body["user"]["id"] == seeded["active_user"]
     assert body["user"]["phone"] == "13800000001"
     assert body["user"]["nickname"] == "体验用户"
+    # 普通用户：没有角色归属
+    assert body["user"]["role"] == "USER"
+    assert body["user"]["provider_id"] is None
+
+
+@pytest.mark.integration
+async def test_login_returns_role_and_provider_id(api_client, db) -> None:
+    """服务商侧账号登录后，响应里带上自己的角色与服务商归属。
+
+    服务商端（web-admin）要靠这个决定「我在哪个服务商名下」——
+    但**隔离本身仍然只认 token**：这里的 provider_id 只是让前端
+    知道自己的归属，不是它能自报的东西。
+    """
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as session:
+        provider = ServiceProvider(name="甲服务商", contact_phone="13900000001")
+        session.add(provider)
+        await session.flush()
+        admin = User(
+            phone="13800000009",
+            nickname="甲管理员",
+            role=UserRole.PROVIDER_ADMIN,
+            provider_id=provider.id,
+        )
+        session.add(admin)
+        await session.flush()
+        await session.commit()
+        provider_id = provider.id
+
+    response = await api_client.post(
+        LOGIN_URL, json={"phone": "13800000009", "code": VALID_CODE}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user"]["role"] == "PROVIDER_ADMIN"
+    assert body["user"]["provider_id"] == provider_id
 
 
 @pytest.mark.integration

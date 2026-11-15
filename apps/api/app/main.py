@@ -21,6 +21,7 @@ from app.api.v1.errors import (
 from app.api.v1.master_action import router as master_action_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.pay import router as pay_router
+from app.api.v1.provider import router as provider_router
 from app.api.v1.settlements import router as settlements_router
 from app.domain.slot_rule import SlotError
 from app.services.errors import (
@@ -46,6 +47,8 @@ app.include_router(master_action_router)
 app.include_router(settlements_router)
 app.include_router(catalog_router)
 app.include_router(addresses_router)
+# 服务商侧只读查询（待派单列表 / 本商师傅列表）
+app.include_router(provider_router)
 # 登录是唯一不需要 token 的业务接口（它本身就是拿 token 的入口）
 app.include_router(auth_router)
 

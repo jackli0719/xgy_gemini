@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps test test-unit test-file openapi h5-test h5-build h5-typecheck
+.PHONY: help up down logs ps test test-unit test-file openapi h5-test h5-build h5-typecheck web-test web-build web-typecheck
 
 COMPOSE_FILE := infra/compose/docker-compose.dev.yml
 COMPOSE_PORTS_FILE := infra/compose/docker-compose.dev.ports.yml
@@ -71,6 +71,17 @@ h5-build: ## 构建用户端 H5（产物在 apps/h5-user/dist）
 
 h5-typecheck: ## 用户端 H5 类型检查（vue-tsc）
 	npm run typecheck --workspace @oto/h5-user
+
+# ---- 前端：服务商 Web 后台 ----
+# 独立工程（apps/web-admin），同样用 npm workspaces 里的脚本跑。
+web-test: ## 跑服务商 Web 后台的前端测试（vitest）
+	npm run test --workspace @oto/web-admin
+
+web-build: ## 构建服务商 Web 后台（产物在 apps/web-admin/dist）
+	npm run build --workspace @oto/web-admin
+
+web-typecheck: ## 服务商 Web 后台类型检查（vue-tsc）
+	npm run typecheck --workspace @oto/web-admin
 
 # 导出 OpenAPI 契约到 apps/api/openapi.json（前端据此生成类型）。
 # 在容器里跑：跟测试同一个镜像环境，导出的 schema 与测试断言的 schema

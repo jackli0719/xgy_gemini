@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.enums import UserRole
+
 __all__ = ["LoginRequest", "LoginResponse", "LoginUser"]
 
 
@@ -34,13 +36,26 @@ class LoginRequest(BaseModel):
 
 
 class LoginUser(BaseModel):
-    """登录用户的基本信息（不含任何归属信息）。"""
+    """登录用户的基本信息 + 身份归属。
+
+    ``role`` 与 ``provider_id`` 是**这个账号自己的**归属信息
+    （JWT 里带着同样的两个 claim），回给客户端是为了让它知道
+    「我是谁、我属于哪个服务商」——服务商端据此决定展示哪些菜单。
+
+    这不是「泄露别家的归属」：这里回的是登录者自己的信息。
+    租户隔离本身不靠这个字段，靠的是 token（见 app.core.auth）。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     id: int = Field(..., description="用户 ID")
     nickname: str = Field(..., description="昵称")
     phone: str = Field(..., description="手机号")
+    role: UserRole = Field(..., description="用户角色")
+    provider_id: int | None = Field(
+        ...,
+        description="归属的服务商 ID；服务商侧角色才有值，其余角色为 null",
+    )
 
 
 class LoginResponse(BaseModel):
