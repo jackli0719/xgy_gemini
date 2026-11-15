@@ -41,6 +41,7 @@ from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
 from app.schemas.order import PlaceOrderRequest
 from app.services.errors import (
+    AddressInUseError,
     AddressNotFoundError,
     CatalogError,
     CatalogNotFoundError,
@@ -164,6 +165,8 @@ def test_exception_status_map_contents() -> None:
         ItemNotFoundError: 404,
         SlotNotFoundError: 404,
         OrderNotFoundError: 404,
+        # 地址被订单引用，删不掉
+        AddressInUseError: 409,
         ItemInactiveError: 409,
         SlotNotInFutureError: 409,
         SlotItemMismatchError: 409,
