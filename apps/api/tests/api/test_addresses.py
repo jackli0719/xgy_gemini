@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import date, time, timedelta
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -24,10 +26,14 @@ from app.core.database import get_session
 from app.main import app
 from app.models.address import Address
 from app.models.base import Base
-from app.models.enums import UserRole
+from app.models.catalog import ServiceCategory, ServiceItem
+from app.models.enums import OrderStatus, PayStatus, UserRole
+from app.models.order import Order
+from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
 
 ADDRESSES_URL = "/api/v1/addresses"
+ORDERS_URL = "/api/v1/orders"
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -322,6 +328,91 @@ async def test_delete_my_address_removes_it_from_list(api_client, seeded) -> Non
         ADDRESSES_URL, headers=_auth_header(seeded["user_a"])
     )
     assert listed.json() == []
+
+
+# =====================================================================
+# 地址被订单引用 -> 409（不是 500）
+# =====================================================================
+
+
+async def _create_order_for_address(
+    db, *, user_id: int, address_id: int
+) -> str:
+    """造一笔引用该地址的订单（连同品类 / 服务项 / 时段）。
+
+    订单表的 address_id 上是 RESTRICT 外键：地址一旦被订单引用就删不掉。
+    """
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    tomorrow = date.today() + timedelta(days=1)
+    async with maker() as session:
+        category = ServiceCategory(name="家庭保洁", parent_id=None, sort_order=1)
+        session.add(category)
+        await session.flush()
+
+        item = ServiceItem(
+            category_id=category.id,
+            name="日常保洁",
+            base_price=Decimal("100.00"),
+            duration_min=60,
+        )
+        session.add(item)
+        await session.flush()
+
+        slot = ScheduleSlot(
+            item_id=item.id,
+            date=tomorrow,
+            start_time=time(9, 0),
+            end_time=time(11, 0),
+            capacity=5,
+            used=0,
+        )
+        session.add(slot)
+        await session.flush()
+
+        order = Order(
+            order_no="OTO20260101007777",
+            user_id=user_id,
+            provider_id=None,
+            master_id=None,
+            address_id=address_id,
+            item_id=item.id,
+            slot_id=slot.id,
+            amount=Decimal("100.00"),
+            status=OrderStatus.PENDING_PAY,
+            pay_status=PayStatus.UNPAID,
+        )
+        session.add(order)
+        await session.commit()
+        return order.order_no
+
+
+@pytest.mark.integration
+async def test_delete_address_used_by_order_returns_409(
+    api_client, seeded, db
+) -> None:
+    """地址被订单引用时删除 -> 409，地址和订单都还在。
+
+    409 而不是 500：外键冲突是「换个地址 / 先处理订单」能解决的冲突，
+    不是服务端坏了。
+    """
+    order_no = await _create_order_for_address(
+        db, user_id=seeded["user_a"], address_id=seeded["address_a"]
+    )
+    headers = _auth_header(seeded["user_a"])
+
+    response = await api_client.delete(
+        "{}/{}".format(ADDRESSES_URL, seeded["address_a"]), headers=headers
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "地址已被订单使用，无法删除"
+
+    # 地址还在
+    listed = await api_client.get(ADDRESSES_URL, headers=headers)
+    assert seeded["address_a"] in [item["id"] for item in listed.json()]
+
+    # 订单也还在
+    orders = await api_client.get(ORDERS_URL, headers=headers)
+    assert order_no in [item["order_no"] for item in orders.json()["items"]]
 
 
 # =====================================================================

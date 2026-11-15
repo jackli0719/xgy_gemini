@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 __all__ = [
+    "AddressInUseError",
     "AddressNotFoundError",
     "CatalogError",
     "CatalogNotFoundError",
@@ -46,6 +47,18 @@ class AddressNotFoundError(PlaceOrderError):
 
     「不存在」与「不属于你」共用同一个异常，消息也不含归属信息——
     否则调用方可以用两者的错误差异探测他人资源是否存在（R5 越权）。
+
+    地址管理（增删改查）链路也复用它：那条链路要的正是这个语义。
+    """
+
+
+class AddressInUseError(PlaceOrderError):
+    """地址已被订单引用，不能删除。
+
+    order.address_id 上是 RESTRICT 外键：地址一旦被订单引用，
+    删掉它订单就指不回地址了（表里没有地址快照列）。
+    数据库会挡下这次删除，这里把外键冲突翻译成 409——
+    「换个地址 / 先处理订单再来」是可行的应对，500 不是。
     """
 
 

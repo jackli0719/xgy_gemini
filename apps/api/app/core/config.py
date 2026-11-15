@@ -15,6 +15,16 @@ ROOT_DIR = Path(__file__).resolve().parents[4]
 # 所以在配置层直接拒绝启动。
 JWT_SECRET_MIN_BYTES = 32
 
+# dev 环境允许使用的占位短信验证码。
+#
+# 非 dev 环境用它（或者任何空值 / 短码）一律拒绝启动——
+# 见 Settings._check_login_sms_code。
+DEV_LOGIN_SMS_CODE = "123456"
+
+# 非 dev 环境下验证码的最短长度。
+# 8 位是「猜不出来」的最低门槛：再短就基本等于没设。
+MIN_LOGIN_SMS_CODE_LENGTH = 8
+
 
 class Settings(BaseSettings):
     """从环境变量 / 根目录 .env 读取的配置项。"""
@@ -43,9 +53,13 @@ class Settings(BaseSettings):
     #
     # **MVP 占位**：不接短信网关，所有手机号都用这一个固定验证码登录。
     # 接真实短信时把 service 里的比对换成「查短信记录 + 校验有效期 + 一次性作废」，
-    # 这个配置项就退休了。生产环境务必把它去掉或改成随机值——
-    # 留着就等于任何人都能用 123456 登录任何手机号。
-    login_sms_code: str = "123456"
+    # 这个配置项就退休了。
+    #
+    # 非 dev 环境**必须**换成足够长的随机值：占位值（123456）、空值、
+    # 短于 8 位的码都会让应用在启动阶段直接拒绝启动
+    # （见下面的 _check_login_sms_code）——
+    # 留着占位值就等于任何人都能用 123456 登录生产库。
+    login_sms_code: str = DEV_LOGIN_SMS_CODE
 
     # 超时自动确认：订单停在「待确认」超过这个小时数就由系统自动确认
     # （见 app/services/auto_confirm.py）。0 或负数会让「立刻全部确认」，
@@ -60,6 +74,46 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AUTO_CONFIRM_THRESHOLD_HOURS 必须为正整数，当前 {}。".format(value)
                 + "阈值非正会让所有「待确认」订单被立刻自动确认。"
+            )
+        return value
+
+    @field_validator("login_sms_code")
+    @classmethod
+    def _check_login_sms_code(cls, value: str, info) -> str:
+        """非 dev 环境不许用占位短信验证码。
+
+        跟 jwt_secret 的校验是同一个思路：**配置阶段就拒绝启动**，
+        而不是等有人拿 123456 登录了生产库才发现。
+
+        三种情况直接拒绝启动：值为空、值是占位码 123456、长度短于 8 位。
+
+        依赖字段声明顺序：app_env 必须声明在 login_sms_code 之前，
+        校验器才拿得到 app_env 的值（info.data 里是「已校验过的字段」）。
+        这条依赖由 apps/api/tests/test_config.py 盯着。
+        """
+        app_env = info.data.get("app_env", "")
+        if app_env.strip().lower() == "dev":
+            # dev：空值等于「没设」，用占位码顶上；显式设了就用设的
+            return value or DEV_LOGIN_SMS_CODE
+        if not value:
+            raise ValueError(
+                "LOGIN_SMS_CODE 在非 dev 环境必须设置（不能为空）。"
+                "生成命令：python -c \"import secrets; print(secrets.token_urlsafe(12))\""
+            )
+        if value == DEV_LOGIN_SMS_CODE:
+            raise ValueError(
+                "LOGIN_SMS_CODE 在非 dev 环境不能是占位值 {}——"
+                "那等于任何人都能用这个码登录。"
+                "生成命令：python -c \"import secrets; print(secrets.token_urlsafe(12))\"".format(
+                    DEV_LOGIN_SMS_CODE
+                )
+            )
+        if len(value) < MIN_LOGIN_SMS_CODE_LENGTH:
+            raise ValueError(
+                "LOGIN_SMS_CODE 在非 dev 环境至少要 {} 位，当前 {} 位。"
+                "生成命令：python -c \"import secrets; print(secrets.token_urlsafe(12))\"".format(
+                    MIN_LOGIN_SMS_CODE_LENGTH, len(value)
+                )
             )
         return value
 
