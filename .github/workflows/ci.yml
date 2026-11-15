@@ -204,6 +204,8 @@ jobs:
           #
           # 白名单（高风险）：改这些地方可能动摇数据隔离、结算金额、
           # 状态机与权限边界——审错一处就是线上事故，所以必审。
+          # （schemas/ 是请求体校验层：金额精度、extra=forbid 这类约束
+          #   就住在那里，同样不能漏审。）
           # 黑名单（低风险）：前端、测试文件、文档、openapi.json、schema.ts
           # 这些由别的 job / 人工覆盖，审它们只是拖慢门禁。
           #
@@ -216,6 +218,7 @@ jobs:
             apps/api/app/core/auth.py
             apps/api/app/api/v1
             apps/api/app/models
+            apps/api/app/schemas
           )
           # 即使落在白名单目录里，这些也要跳过（测试 / 文档 / 生成物）
           LOW_RISK_RE='(^|/)(tests/.*|test_[^/]*\.py|[^/]*\.(spec|test)\.ts|[^/]*\.md|openapi\.json|schema\.ts)$'

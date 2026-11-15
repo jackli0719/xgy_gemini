@@ -108,8 +108,13 @@ Repository secrets → New repository secret**。
 
 | 范围 | 路径 |
 | --- | --- |
-| 高风险（**必审**） | `apps/api/alembic/`、`apps/api/app/services/`、`apps/api/app/core/auth.py`、`apps/api/app/api/v1/`、`apps/api/app/models/` |
+| 高风险（**必审**） | `apps/api/alembic/`、`apps/api/app/services/`、`apps/api/app/core/auth.py`、`apps/api/app/api/v1/`、`apps/api/app/models/`、`apps/api/app/schemas/` |
 | 低风险（**跳过**） | 前端（`apps/web-admin`、`apps/h5-*`、`packages/`）、测试文件、文档（`*.md`）、`openapi.json`、`schema.ts` |
+
+`apps/api/app/schemas/` 在白名单里，是因为**请求体校验层**也守着边界：
+金额精度（`max_digits` / `decimal_places`）、`extra="forbid"`（不许客户端自报
+operator）、`expected_status` 这些约束都写在那里——漏审它等于把结算金额
+的口子留着。
 
 行为上有三条：
 
@@ -119,9 +124,9 @@ Repository secrets → New repository secret**。
 3. job 的 `timeout-minutes` 是 **5**：跑不完就是 job 红 = 阻断合并
    （与第 5 节的 fail-closed 同一口径：没审成 ≠ 审过）。
 
-> 已知取舍：`apps/api/app/schemas/`（请求体校验层）目前**不在**高风险白名单里，
-> 改那里的金额/状态校验不会被门禁看到——要补的话改
-> `.github/workflows/ci.yml` 里的 `HIGH_RISK_PATHS` 数组即可（加一行）。
+> 已知取舍：白名单按目录粗粒度划，`apps/api/app/` 下不在名单里的目录
+> （例如将来新增的 `app/tools/`）默认不审；要收进来就往
+> `.github/workflows/ci.yml` 里的 `HIGH_RISK_PATHS` 数组加一行。
 
 **这不是降低标准，是把标准用在对的地方**：前端与测试由前两个 job 兜住
 （typecheck / test / build 全绿），剩下的人力与机器时间全砸在可能出事故的
