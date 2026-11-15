@@ -8,6 +8,10 @@
 3. **归属不可伪造**：请求里带 provider_id 不起作用（接口压根没这个入参）;
 4. **鉴权**：没 token -> 401；不是服务商侧角色 -> 403。
 
+**可见范围与可派范围的绑定**（这一段防的是「两处谓词各写一份、
+靠人工保持一致」）：列表里出现的每一笔都必须真的派得出去（200），
+别家的单既不在列表里、派单也是 404。两个方向都盯住，任一处漂移都会红。
+
 集成测试用的数据库是 TEST_DATABASE_URL 指向的独立测试库
 （集成 fixture 每次 drop_all + create_all，绝不碰开发库）。
 """
@@ -40,6 +44,7 @@ from app.models.user import User
 
 ORDERS_URL = "/api/v1/provider/orders"
 MASTERS_URL = "/api/v1/provider/masters"
+DISPATCH_URL = "/api/v1/orders/{order_id}/dispatch"
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -374,6 +379,94 @@ async def test_provider_order_list_paginates(api_client, seeded) -> None:
     assert body["total"] == 2
     assert body["limit"] == 1
     assert body["offset"] == 0
+
+
+# =====================================================================
+# 可见范围 <-> 可派范围：绑定测试
+# =====================================================================
+
+
+def test_provider_queries_shares_the_dispatch_scope_source() -> None:
+    """结构性守卫：列表与派单引用的是**同一个**谓词来源。
+
+    两条行为测试（下面两条）盯的是「当前对不对」；这一条盯的是
+    「以后还会不会对」——有人把谓词抄回 provider_queries 里，
+    行为测试在漂移发生前可能照样绿（两处恰好还一致），
+    但这里会 AttributeError 直接失败。
+    """
+    from app.services import dispatch as dispatch_module
+    from app.services import provider_queries
+
+    assert provider_queries.dispatchable_scope is dispatch_module.dispatchable_scope
+
+
+@pytest.mark.integration
+async def test_every_listed_pending_order_can_actually_be_dispatched(
+    api_client, seeded
+) -> None:
+    """列表里出现的每一笔，都真的派得出去（200，不是 404）。
+
+    「可见范围 == 可派范围」这条不变式的正向验证：前端点「派单」
+    不该拿到一个报错。
+    """
+    headers = _admin_a_headers(seeded)
+    listing = await api_client.get(
+        ORDERS_URL, params={"status": "PENDING_DISPATCH"}, headers=headers
+    )
+    assert listing.status_code == 200
+    items = listing.json()["items"]
+    assert items, "种子数据里应当有待派单订单"
+
+    for item in items:
+        response = await api_client.post(
+            DISPATCH_URL.format(order_id=item["id"]),
+            json={"master_id": seeded["master_a1"]},
+            headers=headers,
+        )
+        assert response.status_code == 200, (item["order_no"], response.text)
+        body = response.json()
+        assert body["status"] == "PENDING_ACCEPT"
+        assert body["master_id"] == seeded["master_a1"]
+
+
+@pytest.mark.integration
+async def test_foreign_order_is_neither_listed_nor_dispatchable(
+    api_client, seeded
+) -> None:
+    """反向验证：别家的单既不在列表里，派单也是 404。
+
+    404 的响应与「订单根本不存在」逐字同构——不存在性不泄露。
+    """
+    headers = _admin_a_headers(seeded)
+
+    listing = await api_client.get(
+        ORDERS_URL, params={"status": "PENDING_DISPATCH"}, headers=headers
+    )
+    assert listing.status_code == 200
+    listed_ids = {item["id"] for item in listing.json()["items"]}
+    assert seeded["foreign_order"] not in listed_ids
+
+    response = await api_client.post(
+        DISPATCH_URL.format(order_id=seeded["foreign_order"]),
+        json={"master_id": seeded["master_a1"]},
+        headers=headers,
+    )
+    assert response.status_code == 404
+
+    missing = await api_client.post(
+        DISPATCH_URL.format(order_id=seeded["foreign_order"] + 100000),
+        json={"master_id": seeded["master_a1"]},
+        headers=headers,
+    )
+    assert missing.status_code == 404
+    # 两句话只有客户端自己给的 order_id 不同，归属信息一个字都没有：
+    # 「别家的单」与「根本不存在的单」在响应里长得一模一样。
+    assert response.json()["detail"] == "订单不存在：order_id={}".format(
+        seeded["foreign_order"]
+    )
+    assert missing.json()["detail"] == "订单不存在：order_id={}".format(
+        seeded["foreign_order"] + 100000
+    )
 
 
 # =====================================================================

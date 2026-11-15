@@ -28,6 +28,10 @@
 
 状态变更必须留痕（R4）：每次真的发生状态变更，同一事务内写一条 order_status_log。
 
+**「可派范围」只有一份定义**：``dispatchable_scope``。派单的条件 UPDATE 与
+服务商的待派单列表（app.services.provider_queries）都引用它——两处各写
+一份、靠人工保持一致的做法迟早会漂移。
+
 入参边界：只有 order_id 与 master_id。金额、状态、provider_id 全部由服务端决定。
 """
 from __future__ import annotations
@@ -50,7 +54,7 @@ from app.services.errors import (
     OrderNotFoundError,
 )
 
-__all__ = ["dispatch_order"]
+__all__ = ["dispatchable_scope", "dispatch_order"]
 
 # 状态流转日志里记录的原因
 DISPATCH_REASON = "服务商派单"
@@ -71,6 +75,33 @@ _OPERATOR_TYPE_BY_ROLE: dict[UserRole, OperatorType] = {
     UserRole.PROVIDER_ADMIN: OperatorType.PROVIDER_ADMIN,
     UserRole.PROVIDER_STAFF: OperatorType.PROVIDER_STAFF,
 }
+
+
+def dispatchable_scope(provider_id: int):
+    """构造「本服务商可派单」的归属谓词——**可派范围的事实来源**。
+
+    可派范围有两部分：
+
+    - **公共池**（``provider_id IS NULL``）：客户付完款、还没人接的单。
+      归属还没定，任何服务商都能派。
+    - **本商专属**（``provider_id == 本商 且 master_id IS NULL``）：
+      师傅拒单后退回本商的单，归属已经是本商的、当前没有承接人，可以重新派。
+
+    这个谓词**只在这里写一遍**。派单 service 的条件 UPDATE 和
+    服务商侧待派单列表（app.services.provider_queries）都引用它——
+    两处各写一份、靠人工保持一致的做法迟早会漂移：漂一边的后果是
+    「列表里有、点了派不了」或者「列表里没有、其实能派」。
+
+    与状态条件（``status == PENDING_DISPATCH``）分开：状态条件在两处
+    都是同一个字面值，不必再抽。归属谓词则必须共享。
+    """
+    return or_(
+        Order.provider_id.is_(None),
+        and_(
+            Order.provider_id == provider_id,
+            Order.master_id.is_(None),
+        ),
+    )
 
 
 async def dispatch_order(
@@ -127,18 +158,9 @@ async def dispatch_order(
             .where(
                 Order.id == order_id,
                 Order.status == OrderStatus.PENDING_DISPATCH,
-                # 「归属不变式」有两种形态（provider_id 都不会被改成别家）：
-                # - 还没派过单：provider_id IS NULL
-                # - 师傅拒单后退回本商：provider_id 等于当前服务商，
-                #   且 master_id 已清空（当前没有承接人，可以重新指派）。
-                #   见 app/services/master_action.py 的「拒单只清 master_id」
-                or_(
-                    Order.provider_id.is_(None),
-                    and_(
-                        Order.provider_id == provider_id,
-                        Order.master_id.is_(None),
-                    ),
-                ),
+                # 归属条件与「待派单列表」的可见范围共用同一个谓词
+                # （dispatchable_scope），见那里的说明。
+                dispatchable_scope(provider_id),
             )
             .values(
                 provider_id=provider_id,

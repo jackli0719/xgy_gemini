@@ -17,7 +17,10 @@
     status == PENDING_DISPATCH 且
     (provider_id IS NULL  或  (provider_id == 本商 且 master_id IS NULL))
 
-也就是说待派单池由两部分组成：
+这后半截谓词**直接引用** ``app.services.dispatch.dispatchable_scope``——
+本模块不再自己抄一份，两边共用同一个事实来源。
+
+待派单池由两部分组成：
 
 - **公共池**（``provider_id IS NULL``）：客户付完款、还没人接的单。
   归属还没定，任何服务商都能派——所以它对每个服务商都可见。
@@ -27,9 +30,9 @@
 
 别家的单（``provider_id == 别家``）一律不出现。
 
-本模块的可见范围与派单 service 的可派范围**刻意保持一致**：
-列表里不出现派不了的单（否则前端点「派单」只会拿到一个报错），
-列表里出现的单都真的能派。
+本模块的可见范围与派单 service 的可派范围**是同一个谓词**
+（``dispatchable_scope``）：列表里不出现派不了的单（否则前端点「派单」
+只会拿到一个报错），列表里出现的单都真的能派。
 """
 from __future__ import annotations
 
@@ -37,7 +40,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.catalog import ServiceItem
@@ -45,6 +48,7 @@ from app.models.enums import MasterStatus, OrderStatus, PayStatus
 from app.models.order import Order
 from app.models.provider import Master
 from app.models.schedule_slot import ScheduleSlot
+from app.services.dispatch import dispatchable_scope
 
 __all__ = [
     "ProviderMasterRow",
@@ -99,13 +103,9 @@ def provider_scope_filter(status: OrderStatus, provider_id: int):
       provider_id 是空的，让每个服务商都看见等于把全平台的单摊开给所有人。
     """
     if status == OrderStatus.PENDING_DISPATCH:
-        owned = or_(
-            Order.provider_id.is_(None),
-            and_(
-                Order.provider_id == provider_id,
-                Order.master_id.is_(None),
-            ),
-        )
+        # 可派范围直接引用派单 service 的谓词（单一事实来源），
+        # 不在这里重写一份：两份写法迟早漂移，漂了就是「列表里有、派不了」。
+        owned = dispatchable_scope(provider_id)
     else:
         owned = Order.provider_id == provider_id
     return and_(Order.status == status, owned)
