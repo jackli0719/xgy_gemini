@@ -25,6 +25,8 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -218,6 +220,20 @@ async def _alembic_version(db_url: str) -> str:
         await engine.dispose()
 
 
+def _head_revision() -> str:
+    """当前迁移链的 head 版本号。
+
+    不硬编码字符串：head 会随新迁移往后挪（0007 之后还会有 0008），
+    写死一个版本号，将来再加一条迁移，这条测试就会假失败——
+    失败原因跟被测行为（autocommit_block 之后版本记录照写）没关系。
+    """
+    config = Config(str(ALEMBIC_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(ALEMBIC_DIR / "alembic"))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    assert head is not None, "迁移链里找不到 head 版本"
+    return head
+
+
 def _alembic(db_url: str, *args: str) -> subprocess.CompletedProcess:
     """跑一条 alembic 命令，返回结果。
 
@@ -253,7 +269,8 @@ async def test_migration_roundtrip_is_idempotent() -> None:
 
         # 版本号落对了：autocommit_block 会提前提交事务，
         # 版本记录必须照样写进去，否则这条迁移每次都会重跑
-        assert await _alembic_version(db_url) == "0006_operator_type_finance"
+        # （断言对着 head 写，不写死 0006——head 会随新迁移往后挪）
+        assert await _alembic_version(db_url) == _head_revision()
 
         values = await _operator_type_values(db_url)
         assert "PLATFORM_FINANCE" in values
@@ -269,7 +286,7 @@ async def test_migration_roundtrip_is_idempotent() -> None:
         #    语句带 IF NOT EXISTS，所以这里必须是成功的
         result = _alembic(db_url, "upgrade", "head")
         assert result.returncode == 0, result.stdout + result.stderr
-        assert await _alembic_version(db_url) == "0006_operator_type_finance"
+        assert await _alembic_version(db_url) == _head_revision()
 
         values = await _operator_type_values(db_url)
         assert "PLATFORM_FINANCE" in values

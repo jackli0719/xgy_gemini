@@ -62,6 +62,11 @@ from app.services.errors import (
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
+    PlatformProviderConflictError,
+    PlatformProviderError,
+    PlatformProviderForbiddenError,
+    PlatformProviderNotFoundError,
+    PlatformProviderStatusNotSettableError,
     ServiceFlowError,
     ServiceFlowForbiddenError,
     ServiceFlowInvariantError,
@@ -209,6 +214,13 @@ def test_exception_status_map_contents() -> None:
         ServiceFlowError: 400,
         SettlementError: 400,
         CatalogError: 400,
+        # 平台侧服务商管理（PLAT-01）
+        PlatformProviderNotFoundError: 404,
+        # 状态不允许被设置 -> 改请求内容才可能解决
+        PlatformProviderStatusNotSettableError: 400,
+        PlatformProviderForbiddenError: 403,
+        PlatformProviderConflictError: 409,
+        PlatformProviderError: 400,
     }
 
 
