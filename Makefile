@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps test test-unit test-file openapi h5-test h5-build h5-typecheck master-h5-test master-h5-build master-h5-typecheck web-test web-build web-typecheck
+.PHONY: help up down logs ps test test-unit test-file openapi h5-test h5-build h5-typecheck master-h5-test master-h5-build master-h5-typecheck web-test web-build web-typecheck e2e-seed e2e-serve e2e-clean
 
 COMPOSE_FILE := infra/compose/docker-compose.dev.yml
 COMPOSE_PORTS_FILE := infra/compose/docker-compose.dev.ports.yml
@@ -93,6 +93,20 @@ web-build: ## 构建服务商 Web 后台（产物在 apps/web-admin/dist）
 
 web-typecheck: ## 服务商 Web 后台类型检查（vue-tsc）
 	npm run typecheck --workspace @oto/web-admin
+
+# ---- 人工测试工具（E2E-02）----
+# 种子脚本用 vite-node 跑（vitest 自带的 TS 执行器，仓库里已有，不引新依赖）。
+# 种子脚本连的是开发库（.env 的 DATABASE_URL），碰测试库会直接拒绝执行。
+e2e-seed: ## 往开发库种演示数据（幂等：重复跑不报错，只更新已有行）
+	@npx vite-node e2e/fixtures/seed-cli.ts seed
+
+e2e-clean: ## 清掉 e2e-seed 种的演示数据（ARGS=--with-orders 一并清相关订单）
+	@npx vite-node e2e/fixtures/seed-cli.ts clean $(ARGS)
+
+# 三端前端一起起（5173 / 5174 / 5175），Ctrl+C 一起停。
+# 后端（FastAPI）假定已经在跑：cd apps/api && uvicorn app.main:app --port 8000
+e2e-serve: ## 起三端前端（用户端 5173 / 服务商后台 5174 / 师傅端 5175）
+	@bash e2e/serve.sh
 
 # 导出 OpenAPI 契约到 apps/api/openapi.json（前端据此生成类型）。
 # 在容器里跑：跟测试同一个镜像环境，导出的 schema 与测试断言的 schema

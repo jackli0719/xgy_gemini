@@ -8,8 +8,11 @@ import { defineConfig } from "vitest/config";
 /**
  * 师傅端 H5 构建 / 测试配置。
  *
- * 与用户端（apps/h5-user）同一套骨架，只有端口不同（5174 vs 5173）：
+ * 与用户端（apps/h5-user）同一套骨架，只有端口不同（5175 vs 5173）：
  * 两个应用可以同时开着调试。
+ *
+ * 端口是「三端各占一个」的硬约定（用户端 5173 / 服务商后台 5174 / 师傅端 5175）：
+ * 人工测试与 E2E 都靠端口区分三端，见 e2e/serve.sh。
  *
  * 两个 alias：
  *
@@ -38,9 +41,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5174,
+    port: 5175,
     // 开发时把 /api 代理到本地跑着的 FastAPI（uvicorn 默认 8000）。
-    // CORS_ORIGINS 里需要放行 http://localhost:5174（见根目录 .env）。
+    // 走的是同源代理，浏览器不直接跨域调后端，所以 CORS 不用管。
     proxy: {
       "/api": {
         target: "http://localhost:8000",
