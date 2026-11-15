@@ -53,7 +53,9 @@ from app.services.errors import (
     MasterActionError,
     MasterActionForbiddenError,
     MasterActionInvariantError,
+    MasterNotDispatchableError,
     MasterNotFoundError,
+    MasterStatusNotSettableError,
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
@@ -177,6 +179,10 @@ def test_exception_status_map_contents() -> None:
         # 派单
         DispatchForbiddenError: 403,
         MasterNotFoundError: 404,
+        # 师傅状态管理：状态不允许被设置 -> 改请求内容才可能解决
+        MasterStatusNotSettableError: 400,
+        # 本商师傅当前不可接单（停用 / 休假 / 未审核）-> 换个师傅是可行的应对
+        MasterNotDispatchableError: 409,
         # 师傅接单/拒单
         MasterActionForbiddenError: 403,
         MasterActionInvariantError: 500,
