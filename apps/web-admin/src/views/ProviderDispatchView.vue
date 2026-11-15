@@ -57,7 +57,9 @@ async function load(): Promise<void> {
       api.listProviderMasters(),
     ]);
     orders.value = orderResult.items;
-    masters.value = masterResult.items;
+    // 下拉**只列在岗的师傅**：后端派单时会拒掉停用 / 休假 / 未审核的师傅
+    // （409「师傅当前不可接单」），把他们列出来等于让人点一下再吃一个报错。
+    masters.value = masterResult.items.filter((master) => master.status === "ACTIVE");
   } catch (err) {
     errorText.value = err instanceof ApiError ? err.detail : "加载失败，请稍后再试";
   } finally {

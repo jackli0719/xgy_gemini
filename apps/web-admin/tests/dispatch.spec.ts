@@ -68,10 +68,26 @@ const MASTERS = {
       real_name: "师傅乙",
       phone: "13800000006",
       rating: null,
+      status: "ACTIVE",
+    },
+    // 已停用的师傅：后端派单会拒（409），所以下拉里不该出现
+    {
+      id: 203,
+      real_name: "师傅丙",
+      phone: "13800000007",
+      rating: "4.0",
+      status: "DISABLED",
+    },
+    // 还没通过审核的师傅：同样接不了单，也不该出现在下拉里
+    {
+      id: 204,
+      real_name: "师傅丁",
+      phone: "13800000008",
+      rating: null,
       status: "PENDING",
     },
   ],
-  total: 2,
+  total: 4,
 };
 
 async function mountDispatchPage() {
@@ -168,5 +184,27 @@ describe("派单页", () => {
     expect(mockClient.dispatchOrder).toHaveBeenCalledTimes(1);
     // 派出去的订单已经不在待派单池里：不刷新就会看到幽灵数据
     expect(mockClient.listProviderOrders).toHaveBeenCalledTimes(2);
+  });
+
+  it("下拉只列在岗的师傅：接口返回 4 个，下拉只有 2 项", async () => {
+    const wrapper = await mountDispatchPage();
+
+    await wrapper.find('[data-test="dispatch-btn"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.find('[data-test="master-select"] input').trigger("click");
+    await flushPromises();
+
+    // 接口返回了 4 个师傅（2 个在岗 + 1 个停用 + 1 个未审核），下拉里只有两个
+    expect(mockClient.listProviderMasters).toHaveBeenCalledTimes(1);
+    const options = wrapper.findAll(".el-select-dropdown__item");
+    expect(options).toHaveLength(2);
+
+    const labels = options.map((option) => option.text()).join();
+    expect(labels).toContain("师傅甲");
+    expect(labels).toContain("师傅乙");
+    // 停用 / 未审核的师傅不该出现：派单会被后端拒掉（409）
+    expect(labels).not.toContain("师傅丙");
+    expect(labels).not.toContain("师傅丁");
   });
 });

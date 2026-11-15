@@ -2,7 +2,7 @@
 
 师傅对「派给自己」的订单做出响应：接单（转「已接单」）或拒单（退回「待派单」）。
 
-五条硬约束（每一条都有测试盯着）：
+六条硬约束（每一条都有测试盯着）：
 
 1. **师傅身份从 CurrentUser 查 master 表得到**，不从入参取。
    两个函数的签名里都没有 master_id 参数——不是「约定别传」，是「传不进来」。
@@ -20,6 +20,10 @@
    师傅拒单不改变归属服务商——否则订单会从服务商手里漏出去（R1）。
    订单退回本商的「待派单」池，可以重新派单
    （见 dispatch 里「归属不变式」对这两种形态的区分）。
+6. **只有 ACTIVE 的师傅能接单**：停用（DISABLED）、休假（ON_LEAVE）、
+   未审核（PENDING）的师傅接不了新单（409）。
+   **拒单不拦**：停用的师傅手上可能还有派给他的单，
+   让他退回去才是出路——挡住拒单等于把单卡死在他手上。
 
 事务边界：查师傅、条件更新、写日志、回读订单在同一事务内，要么全成要么全不成。
 """
@@ -32,12 +36,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
 from app.domain.order_state import assert_transition
-from app.models.enums import OperatorType, OrderStatus
+from app.models.enums import MasterStatus, OperatorType, OrderStatus
 from app.models.order import Order, OrderStatusLog
 from app.models.provider import Master
 from app.services.errors import (
     MasterActionForbiddenError,
     MasterActionInvariantError,
+    MasterNotDispatchableError,
     OrderNotFoundError,
 )
 
@@ -67,6 +72,19 @@ async def accept_order(
     """
     async with session.begin():
         master = await _resolve_master(session, current_user)
+        # 师傅当前能不能接单：只有 ACTIVE 可以。
+        # 停用 / 休假 / 未审核的师傅不接新单（409）。
+        #
+        # 这条与派单那头是同一条业务规则（「能接单的师傅是在岗的师傅」），
+        # 所以抛的是同一个异常、同一句话（见 app.services.errors）：
+        # 服务商把师傅停用之后，派单那头派不到他，他自己这头也接不了。
+        #
+        # **拒单不查这个**：停用的师傅手上可能还有派给他的单，
+        # 让他退回去才是出路，挡住拒单等于把单卡死在他手上。
+        if master.status != MasterStatus.ACTIVE:
+            raise MasterNotDispatchableError(
+                "师傅当前不可接单：master_id={}".format(master.id)
+            )
         now = datetime.now(timezone.utc)
 
         order_id = await _claim_order(

@@ -67,6 +67,8 @@ MY_MASTER_ID = 1  # 本商师傅
 OTHER_MASTER_ID = 8  # 别家师傅
 MY_OTHER_MASTER_ID = 9  # 本商另一个师傅（拒单后改派给他）
 MISMATCHED_MASTER_ID = 10  # 身份错乱：token 说本商，master 表说别家
+DISABLED_MASTER_ID = 11  # 本商师傅，但已停用（接不了单，但可以拒单）
+ON_LEAVE_MASTER_ID = 12  # 本商师傅，在休假（同样接不了单）
 
 # 订单
 MY_ORDER_ID = 1  # 派给我的师傅，待接单
@@ -74,6 +76,8 @@ OTHER_MASTER_ORDER_ID = 2  # 派给别家师傅
 NOT_DISPATCHED_ORDER_ID = 3  # 还没派单
 ACCEPTED_ORDER_ID = 4  # 已经接单
 UNPAID_ORDER_ID = 5  # 还没支付
+DISABLED_MASTER_ORDER_ID = 6  # 派给已停用的师傅，待接单
+ON_LEAVE_MASTER_ORDER_ID = 7  # 派给休假的师傅，待接单
 
 # 账号
 CUSTOMER_USER_ID = 1
@@ -83,6 +87,8 @@ MY_MASTER_USER_ID = 4
 OTHER_MASTER_USER_ID = 5
 MY_OTHER_MASTER_USER_ID = 6
 MISMATCHED_USER_ID = 7  # 本商管理员，但 master 表把他挂在别家
+DISABLED_MASTER_USER_ID = 8  # 已停用的师傅账号
+ON_LEAVE_MASTER_USER_ID = 9  # 休假的师傅账号
 
 BASE_PRICE = Decimal("100.00")
 
@@ -91,6 +97,8 @@ OTHER_MASTER_ORDER_NO = "OTO20260101000002"
 NOT_DISPATCHED_ORDER_NO = "OTO20260101000003"
 ACCEPTED_ORDER_NO = "OTO20260101000004"
 UNPAID_ORDER_NO = "OTO20260101000005"
+DISABLED_MASTER_ORDER_NO = "OTO20260101000006"
+ON_LEAVE_MASTER_ORDER_NO = "OTO20260101000007"
 MISSING_ORDER_NO = "OTO20260101009999"
 
 
@@ -113,6 +121,16 @@ def _auth_header(user_id: int, role: UserRole, provider_id: int | None) -> dict[
 
 def _my_master_header() -> dict[str, str]:
     return _auth_header(MY_MASTER_USER_ID, UserRole.MASTER, None)
+
+
+def _disabled_master_header() -> dict[str, str]:
+    """已停用的师傅账号。"""
+    return _auth_header(DISABLED_MASTER_USER_ID, UserRole.MASTER, None)
+
+
+def _on_leave_master_header() -> dict[str, str]:
+    """休假的师傅账号。"""
+    return _auth_header(ON_LEAVE_MASTER_USER_ID, UserRole.MASTER, None)
 
 
 def _other_master_header() -> dict[str, str]:
@@ -323,6 +341,18 @@ async def seeded(db):
                     role=UserRole.PROVIDER_ADMIN,
                     provider_id=MY_PROVIDER_ID,
                 ),
+                # 已停用的师傅账号
+                User(
+                    id=DISABLED_MASTER_USER_ID,
+                    phone="13900000008",
+                    role=UserRole.MASTER,
+                ),
+                # 休假的师傅账号
+                User(
+                    id=ON_LEAVE_MASTER_USER_ID,
+                    phone="13900000009",
+                    role=UserRole.MASTER,
+                ),
             ]
         )
         await session.flush()
@@ -391,6 +421,22 @@ async def seeded(db):
                     user_id=MISMATCHED_USER_ID,
                     real_name="赵师傅",
                     status=MasterStatus.ACTIVE,
+                ),
+                # 已停用的师傅：接不了新单，但可以把手上那单退回去
+                Master(
+                    id=DISABLED_MASTER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    user_id=DISABLED_MASTER_USER_ID,
+                    real_name="停用师傅",
+                    status=MasterStatus.DISABLED,
+                ),
+                # 休假的师傅：同样接不了单
+                Master(
+                    id=ON_LEAVE_MASTER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    user_id=ON_LEAVE_MASTER_USER_ID,
+                    real_name="休假师傅",
+                    status=MasterStatus.ON_LEAVE,
                 ),
             ]
         )
@@ -476,6 +522,38 @@ async def seeded(db):
                     amount=BASE_PRICE,
                     status=OrderStatus.PENDING_PAY,
                     pay_status=PayStatus.UNPAID,
+                ),
+                # 派给已停用的师傅：接不了单，但可以拒单退回待派单池
+                Order(
+                    id=DISABLED_MASTER_ORDER_ID,
+                    order_no=DISABLED_MASTER_ORDER_NO,
+                    user_id=CUSTOMER_USER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    master_id=DISABLED_MASTER_ID,
+                    address_id=4,
+                    item_id=2,
+                    slot_id=3,
+                    amount=BASE_PRICE,
+                    status=OrderStatus.PENDING_ACCEPT,
+                    pay_status=PayStatus.PAID,
+                    paid_at=now,
+                    dispatched_at=now,
+                ),
+                # 派给休假的师傅
+                Order(
+                    id=ON_LEAVE_MASTER_ORDER_ID,
+                    order_no=ON_LEAVE_MASTER_ORDER_NO,
+                    user_id=CUSTOMER_USER_ID,
+                    provider_id=MY_PROVIDER_ID,
+                    master_id=ON_LEAVE_MASTER_ID,
+                    address_id=4,
+                    item_id=2,
+                    slot_id=3,
+                    amount=BASE_PRICE,
+                    status=OrderStatus.PENDING_ACCEPT,
+                    pay_status=PayStatus.PAID,
+                    paid_at=now,
+                    dispatched_at=now,
                 ),
             ]
         )
@@ -566,6 +644,85 @@ async def test_accept_own_order_succeeds(api_client, seeded, db) -> None:
     assert logs[0].operator_type == OperatorType.MASTER
     assert logs[0].operator_id == MY_MASTER_USER_ID
     assert logs[0].reason == master_action_module.ACCEPT_REASON
+
+
+# ---------------------------------------------------------------------
+# 1.5 师傅状态：只有 ACTIVE 能接单（拒单不拦）
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_inactive_master_cannot_accept_order(api_client, seeded, db) -> None:
+    """不在岗的师傅接单 -> 409「师傅当前不可接单」，订单没被接走。
+
+    服务商把师傅停用之后，派单那头派不到他（dispatch 也拦），
+    他自己这头也该接不了——不然「停用」只是个摆设。
+
+    停用（DISABLED）与休假（ON_LEAVE）一起盯：规则是「只有 ACTIVE 能接单」，
+    不是「只要不是停用就行」。
+    """
+    for master_id, order_no, header in (
+        (DISABLED_MASTER_ID, DISABLED_MASTER_ORDER_NO, _disabled_master_header()),
+        (ON_LEAVE_MASTER_ID, ON_LEAVE_MASTER_ORDER_NO, _on_leave_master_header()),
+    ):
+        response = await api_client.post(_accept_url(order_no), headers=header)
+        assert response.status_code == 409, master_id
+        assert response.json()["detail"] == "师傅当前不可接单：master_id={}".format(
+            master_id
+        )
+
+    # 订单一个字节都没动，也没留痕
+    for order_id in (DISABLED_MASTER_ORDER_ID, ON_LEAVE_MASTER_ORDER_ID):
+        order = await _order_of(db, order_id)
+        assert order.status == OrderStatus.PENDING_ACCEPT
+        assert order.accepted_at is None
+        assert await _logs_of(db, order_id) == []
+
+
+@pytest.mark.integration
+async def test_active_master_can_accept_order(api_client, seeded, db) -> None:
+    """在岗的师傅接自己的单 -> 200。
+
+    与上面那条对着看：同一个接口、同一个订单形状，区别只在师傅状态。
+    没有这条对照，409 可能来自别的原因（比如订单本身的状态）。
+    """
+    response = await api_client.post(
+        _accept_url(MY_ORDER_NO),
+        headers=_my_master_header(),
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == OrderStatus.ACCEPTED.value
+
+    order = await _order_of(db, MY_ORDER_ID)
+    assert order.status == OrderStatus.ACCEPTED
+
+
+@pytest.mark.integration
+async def test_disabled_master_can_reject_order(api_client, seeded, db) -> None:
+    """已停用的师傅**可以**拒单 -> 200，订单退回待派单池。
+
+    拒单不拦：停用的师傅手上可能还有派给他的单，
+    让他退回去才是出路——挡住拒单等于把单卡死在他手上。
+    """
+    response = await api_client.post(
+        _reject_url(DISABLED_MASTER_ORDER_NO),
+        json={"reason": "我已经不接单了"},
+        headers=_disabled_master_header(),
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == OrderStatus.PENDING_DISPATCH.value
+
+    order = await _order_of(db, DISABLED_MASTER_ORDER_ID)
+    assert order.status == OrderStatus.PENDING_DISPATCH
+    # 拒单只清承接师傅，归属服务商不变
+    assert order.master_id is None
+    assert order.provider_id == MY_PROVIDER_ID
+
+    logs = await _logs_of(db, DISABLED_MASTER_ORDER_ID)
+    assert len(logs) == 1
+    assert logs[0].to_status == OrderStatus.PENDING_DISPATCH
+    assert logs[0].operator_type == OperatorType.MASTER
+    assert logs[0].operator_id == DISABLED_MASTER_USER_ID
 
 
 # ---------------------------------------------------------------------

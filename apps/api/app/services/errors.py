@@ -105,10 +105,10 @@ class DispatchError(Exception):
     与 ``PlaceOrderError`` 平级而不是它的子类：派单与下单是两条链路，
     共用一个基类会让「下单失败」的兜底文案套到派单错误上。
 
-    这棵树现在也承载**服务商侧师傅管理**那条链路
-    （app.services.master_management）：两条链路判的是同一件事——
-    「这个师傅在不在本商作用域内、他能不能接单」，共用同一套异常与文案，
-    免得同一个错误在两个接口里长得不一样。
+    这棵树现在也承载**服务商侧师傅管理**（app.services.master_management）
+    与**师傅自助接单**（app.services.master_action）两条链路：
+    它们判的是同一件事——「这个师傅在不在本商作用域内、他能不能接单」，
+    共用同一套异常与文案，免得同一个错误在两个接口里长得不一样。
     """
 
 
@@ -122,6 +122,9 @@ class MasterNotFoundError(DispatchError):
 
 class MasterNotDispatchableError(DispatchError):
     """师傅当前不可接单（停用 / 休假 / 未审核）。
+
+    派单与师傅自助接单共用这一条：服务商把师傅停用之后，
+    派单那头派不到他，他自己这头也接不了——同一个错误、同一句话。
 
     归属校验先于状态校验：别家的师傅永远是 404（不泄露存在性），
     本商但不可接单的师傅才是 409——「换个师傅派」是可行的应对。
