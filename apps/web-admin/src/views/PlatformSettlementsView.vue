@@ -6,15 +6,20 @@
   2. 筛选栏：状态 / 服务商——筛选是查询条件，不是隔离边界；
   3. 待结算的行上点「确认结算」-> 调确认接口 -> 刷新列表。
 
-  **确认是钱相关的动作**：只有平台财务能确认（后端按 token 里的 role 判，
-  其他角色一律 403；接口是 T-11b 做的 POST /api/v1/settlements/{id}/confirm）。
-  这一页的角色门槛是「平台财务 / 平台管理员」，但**数据接口**后端只放
-  PLATFORM_FINANCE——管理员能进这页，调接口会拿到 403（前端会显示错误文案）。
+  **看与确认是两件事**：
+  - 列表接口（GET /api/v1/platform/settlements）平台财务与平台管理员都能看
+    ——管理员要能对账、核查服务商的结算情况；
+  - 确认接口（POST /api/v1/settlements/{id}/confirm，T-11b 做的那条）
+    **只认平台财务**：后端按 token 里的 role 判，其他角色一律 403。
+
+  所以平台管理员进这页能看到列表，但**看不到「确认结算」按钮**
+  （前端不给点，后端也拦得住——两边都堵，才不会出现「点了才知道不行」）。
+  非财务角色看到的待结算行写「仅财务可确认」。
 
   筛选条件变了就回到第一页重新拉（否则会停在不存在的页码上）。
 -->
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import {
   ElButton,
   ElOption,
@@ -28,10 +33,21 @@ import {
 import { ApiError, type Schemas } from "@oto/shared/api";
 
 import { api } from "@/api";
+import { useSessionStore } from "@/stores/session";
 import { formatDateTime } from "@/utils/date";
 
 type PlatformSettlementItem = Schemas["PlatformSettlementItem"];
 type SettlementStatus = PlatformSettlementItem["status"];
+
+const session = useSessionStore();
+
+/**
+ * 能不能点「确认结算」：**只有平台财务**。
+ *
+ * 后端确认接口只放 PLATFORM_FINANCE（钱相关的写动作），
+ * 前端跟着收窄——管理员能看见列表，但对没有权限的动作不给按钮。
+ */
+const canConfirm = computed(() => session.isPlatformFinance);
 
 /** 结算单状态 -> 中文文案与 tag 颜色。 */
 const STATUS_TEXT: Record<SettlementStatus, string> = {
@@ -198,9 +214,15 @@ onMounted(() => {
       </el-table-column>
       <el-table-column label="操作" min-width="150">
         <template #default="{ row }">
-          <!-- 只有待结算的单能确认；已确认的显示确认时间 -->
+          <!--
+            三个分支：
+            1. 待结算 + 财务 -> 给「确认结算」按钮；
+            2. 待结算 + 非财务 -> 不给按钮，写明「仅财务可确认」
+               （后端确认接口也只放财务，这里只是不让人白点一次）；
+            3. 已确认 -> 显示确认时间。
+          -->
           <el-button
-            v-if="row.status === 'PENDING'"
+            v-if="row.status === 'PENDING' && canConfirm"
             type="primary"
             size="small"
             data-test="confirm-button"
@@ -209,6 +231,9 @@ onMounted(() => {
           >
             确认结算
           </el-button>
+          <span v-else-if="row.status === 'PENDING'" data-test="finance-only-hint">
+            仅财务可确认
+          </span>
           <span v-else data-test="confirmed-at">
             {{ row.confirmed_at ? formatDateTime(row.confirmed_at) : "—" }}
           </span>

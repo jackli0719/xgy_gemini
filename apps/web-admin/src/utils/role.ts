@@ -14,7 +14,7 @@
 export const PLATFORM_ADMIN = "PLATFORM_ADMIN";
 /** 平台运营（能看订单总览、管目录，但管不了服务商入驻）。 */
 export const PLATFORM_OPS = "PLATFORM_OPS";
-/** 平台财务（确认结算：结算单列表只有这个角色能看）。 */
+/** 平台财务（确认结算：结算单列表它和平台管理员都能看，但只有它能确认）。 */
 export const PLATFORM_FINANCE = "PLATFORM_FINANCE";
 
 /** 服务商侧角色（派单 / 师傅管理）。 */

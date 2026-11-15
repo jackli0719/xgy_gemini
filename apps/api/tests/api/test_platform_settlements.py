@@ -2,12 +2,14 @@
 
 必测点：
 
-1. **鉴权**：只有 PLATFORM_FINANCE 能进；普通用户 / 服务商账号 /
-   平台管理员 / 平台运营 -> 403，且是**碰库之前**就挡住（不泄露任何结算单
-   信息）；没 token -> 401。
+1. **鉴权**：PLATFORM_FINANCE 与 PLATFORM_ADMIN 都能进（**看**）；
+   普通用户 / 服务商账号 / 平台运营 -> 403，且是**碰库之前**就挡住
+   （不泄露任何结算单信息）；没 token -> 401。
 2. **分页 + 筛选正确**：page / limit / total 对得上；
    status / provider_id 能筛；两个条件是「与」的关系；limit 上限 100。
 3. **不返回内部字段**：确认人 id、创建 / 更新时间戳都不在响应里。
+4. **确认仍限财务**（配套的写接口）：PLATFORM_FINANCE -> 200，
+   PLATFORM_ADMIN -> 403。看得到列表不等于能确认。
 
 集成测试用的数据库是 TEST_DATABASE_URL 指向的独立测试库
 （集成 fixture 每次 drop_all + create_all，绝不碰开发库）。
@@ -20,6 +22,7 @@ from decimal import Decimal
 
 import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.auth import create_access_token
@@ -222,16 +225,24 @@ async def test_list_settlements_rejects_provider_admin(api_client, seeded) -> No
 
 
 @pytest.mark.integration
-async def test_list_settlements_rejects_platform_admin(api_client, seeded) -> None:
-    """平台管理员 -> 403。
+async def test_list_settlements_allows_platform_admin(api_client, seeded) -> None:
+    """平台管理员 -> 200：**能看**。
 
-    结算单列表是**财务**的接口：平台管理员管服务商入驻，不管钱。
-    角色不对就在碰库之前挡住——响应里没有任何结算单信息。
+    管理员管全局（服务商入驻、订单总览），对账、核查服务商的结算情况
+    是它的日常——所以列表接口也放它。
+
+    注意这里只是「看」：确认结算是另一回事，见本文件末尾的
+    确认接口用例（管理员确认 -> 403）。
     """
     headers = _auth_header(seeded["platform_admin"], UserRole.PLATFORM_ADMIN, None)
     response = await api_client.get(SETTLEMENTS_URL, headers=headers)
-    assert response.status_code == 403
-    assert response.json() == {"detail": "Forbidden"}
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 3
+    assert {item["provider_name"] for item in body["items"]} == {
+        "甲服务商",
+        "乙服务商",
+    }
 
 
 @pytest.mark.integration
@@ -482,3 +493,77 @@ async def test_list_settlements_rejects_non_positive_provider_id(api_client, see
         SETTLEMENTS_URL, params={"provider_id": 0}, headers=headers
     )
     assert response.status_code == 422
+
+
+# =====================================================================
+# 配套的「确认」接口：看得到 ≠ 确认得了
+# =====================================================================
+
+
+def _confirm_url(settlement_id: int) -> str:
+    return "/api/v1/settlements/{}/confirm".format(settlement_id)
+
+
+async def _settlement_of(db, settlement_id: int) -> Settlement:
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as session:
+        return (
+            await session.execute(
+                select(Settlement).where(Settlement.id == settlement_id)
+            )
+        ).scalar_one()
+
+
+@pytest.mark.integration
+async def test_confirm_settlement_allows_finance(api_client, db, seeded) -> None:
+    """平台财务 -> 200：确认得了。"""
+    headers = _finance_headers(seeded)
+    response = await api_client.post(
+        _confirm_url(seeded["settlement_a_pending"]), headers=headers
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "CONFIRMED"
+
+    settlement = await _settlement_of(db, seeded["settlement_a_pending"])
+    assert settlement.status == SettlementStatus.CONFIRMED
+
+
+@pytest.mark.integration
+async def test_confirm_settlement_rejects_platform_admin(api_client, db, seeded) -> None:
+    """平台管理员 -> 403：**看得见列表，但确认不了**。
+
+    确认结算是把钱定下来的动作，只归财务。管理员看得见列表是为了对账，
+    不是为了替财务点确认。
+    """
+    headers = _auth_header(seeded["platform_admin"], UserRole.PLATFORM_ADMIN, None)
+    response = await api_client.post(
+        _confirm_url(seeded["settlement_a_pending"]), headers=headers
+    )
+    assert response.status_code == 403
+
+    # 数据一点没动
+    settlement = await _settlement_of(db, seeded["settlement_a_pending"])
+    assert settlement.status == SettlementStatus.PENDING
+    assert settlement.confirmed_by is None
+    assert settlement.confirmed_at is None
+
+
+@pytest.mark.integration
+async def test_confirm_settlement_rejects_other_roles(api_client, db, seeded) -> None:
+    """其他角色（运营 / 普通用户 / 服务商账号）-> 403。"""
+    cases = [
+        _auth_header(seeded["platform_ops"], UserRole.PLATFORM_OPS, None),
+        _auth_header(seeded["plain_user"], UserRole.USER, None),
+        _auth_header(
+            seeded["provider_admin"], UserRole.PROVIDER_ADMIN, seeded["provider_a"]
+        ),
+    ]
+    for headers in cases:
+        response = await api_client.post(
+            _confirm_url(seeded["settlement_a_pending"]), headers=headers
+        )
+        assert response.status_code == 403
+
+    settlement = await _settlement_of(db, seeded["settlement_a_pending"])
+    assert settlement.status == SettlementStatus.PENDING

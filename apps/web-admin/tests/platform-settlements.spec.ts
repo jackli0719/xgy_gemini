@@ -8,7 +8,9 @@
  *    并把新的筛选条件带进请求（这是「筛选是查询条件」的具体体现）；
  * 3. **确认按钮只在 PENDING 行显示**：已确认的行显示确认时间；
  *    点「确认结算」-> 调 confirmSettlement 且带上正确的 settlement_id
- *    -> 刷新列表。
+ *    -> 刷新列表；
+ * 4. **平台管理员看得见列表、但没有确认按钮**（看得到 ≠ 确认得了：
+ *    确认接口只放平台财务）。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,12 +62,21 @@ const SETTLEMENTS = {
   ],
 };
 
-/** 平台财务（结算确认这页的主角）。 */
+/** 平台财务（结算确认这页的主角：能看，也能确认）。 */
 const PLATFORM_FINANCE: CurrentUser = {
   id: 4,
   nickname: "平台财务",
   phone: "13700000004",
   role: "PLATFORM_FINANCE",
+  provider_id: null,
+};
+
+/** 平台管理员（能看列表，但不能确认——确认只归财务）。 */
+const PLATFORM_ADMIN: CurrentUser = {
+  id: 2,
+  nickname: "平台管理员",
+  phone: "13700000002",
+  role: "PLATFORM_ADMIN",
   provider_id: null,
 };
 
@@ -198,5 +209,22 @@ describe("平台侧结算确认页", () => {
     );
     // 失败也刷新：服务端说这张单已经不在「待结算」了，列表要跟上
     expect(mockClient.listPlatformSettlements).toHaveBeenCalledTimes(2);
+  });
+
+  it("平台管理员：看得见列表，但没有「确认结算」按钮", async () => {
+    const { wrapper } = await mountSettlementPage(PLATFORM_ADMIN);
+
+    // 列表照常拉、照常渲染
+    expect(mockClient.listPlatformSettlements).toHaveBeenCalledTimes(1);
+    const rows = wrapper.findAll(".el-table__body-wrapper tbody tr");
+    expect(rows).toHaveLength(2);
+    expect(wrapper.text()).toContain("甲服务商");
+
+    // 但没有确认按钮：确认接口只放平台财务，前端不给这个入口
+    expect(wrapper.findAll('[data-test="confirm-button"]')).toHaveLength(0);
+    // 待结算的那行写明原因，而不是空着
+    expect(wrapper.find('[data-test="finance-only-hint"]').text()).toBe(
+      "仅财务可确认",
+    );
   });
 });

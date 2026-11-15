@@ -2,12 +2,17 @@
 
 一个接口：``GET /api/v1/platform/settlements``。
 
-**为什么只有财务能看**：结算单是钱的凭据，列表里有金额三件套。
-确认结算（POST /api/v1/settlements/{id}/confirm，T-11b）本来就只认
-PLATFORM_FINANCE；这一道门是同一个道理——**角色不对一律 403，
-而且是在碰库之前就挡住**（角色不对的账号连「有几张待结算单」都问不到）。
+**看与确认是两件事**：
 
-**筛选不是隔离边界**：财务本来就看全平台结算单，
+- **看**（这个接口）：平台财务与平台管理员都能看——管理员管全局，
+  对账、核查服务商的结算情况是它的日常。
+- **确认**（POST /api/v1/settlements/{id}/confirm，T-11b）：只认
+  PLATFORM_FINANCE。把钱定下来的动作不外放。
+
+角色不对一律 403，而且是在碰库之前就挡住
+（角色不对的账号连「有几张待结算单」都问不到）。
+
+**筛选不是隔离边界**：这两个角色本来就看全平台结算单，
 ``status`` / ``provider_id`` 只是查询条件。
 
 **分页上限 100**：limit 超过上限按 100 算，不报错
@@ -20,7 +25,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import CurrentUser, require_platform_finance
+from app.core.auth import CurrentUser, require_platform_settlement_viewer
 from app.core.database import get_session
 from app.models.enums import SettlementStatus
 from app.schemas.platform_settlement import (
@@ -55,9 +60,9 @@ async def list_platform_settlements(
         description="每页条数，默认 20，上限 100（超过按 100 算）",
     ),
     session: AsyncSession = Depends(get_session),
-    current_user: CurrentUser = Depends(require_platform_finance),
+    current_user: CurrentUser = Depends(require_platform_settlement_viewer),
 ) -> PlatformSettlementListResponse:
-    """列出平台财务可见的全部结算单。"""
+    """列出平台侧可见的全部结算单（财务与管理员）。"""
     # 分页参数**在这里收敛一次**，然后把收敛后的值传给 service。
     # 收敛做两遍（接口层 + service 层）的话，两边哪天不一致，
     # 就会出现「回显 limit=100、实际却取回 500 条」这种自相矛盾的响应。

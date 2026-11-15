@@ -696,7 +696,7 @@ export interface paths {
         };
         /**
          * 平台结算单列表（可按状态 / 服务商筛选）
-         * @description 列出平台财务可见的全部结算单。
+         * @description 列出平台侧可见的全部结算单（财务与管理员）。
          */
         get: operations["list_platform_settlements_api_v1_platform_settlements_get"];
         put?: never;

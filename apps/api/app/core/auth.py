@@ -44,6 +44,7 @@ __all__ = [
     "require_master_scope",
     "require_platform_admin",
     "require_platform_finance",
+    "require_platform_settlement_viewer",
     "require_platform_staff",
     "require_provider_scope",
 ]
@@ -65,6 +66,19 @@ PROVIDER_ROLES = frozenset({UserRole.PROVIDER_ADMIN, UserRole.PROVIDER_STAFF})
 # 它们与服务商侧一样不带 provider_id（数据库 CHECK 约束强制），
 # 所以在平台上看到的不是「某一家的数据」，而是全平台的数据。
 PLATFORM_STAFF_ROLES = frozenset({UserRole.PLATFORM_ADMIN, UserRole.PLATFORM_OPS})
+
+# 平台侧「结算可见」角色：PLATFORM_FINANCE 与 PLATFORM_ADMIN。
+#
+# **看**和**确认**是两件事，卡在这两个角色之间：
+# - 平台管理员管全局（服务商入驻、订单总览），看一眼结算单列表
+#   是合理的（对账、核查服务商）；
+# - 但「确认结算」是把钱定下来的动作，只归财务
+#   （见 app.services.settle._require_finance_role）。
+#
+# 所以列表接口放这两个角色，确认接口只放 PLATFORM_FINANCE。
+PLATFORM_SETTLEMENT_VIEW_ROLES = frozenset(
+    {UserRole.PLATFORM_FINANCE, UserRole.PLATFORM_ADMIN}
+)
 
 # 缺少 header 时同样要 401。
 # 这里用 Header(default=None) 而不是 Header(...):
@@ -268,13 +282,39 @@ async def require_platform_finance(
     通过条件：角色是 PLATFORM_FINANCE。不满足 -> 403 Forbidden，
     消息与别处的越权失败一致（不区分「角色不对」还是「没带归属」）。
 
-    **为什么单独一道门**：钱相关的动作（确认结算）只有财务能做，
+    **为什么单独一道门**：钱相关的**写**动作（确认结算）只有财务能做，
     与「平台运营」（看订单总览、管目录）不是一回事——运营看得见单子，
     但不能替财务确认结算单。
+
+    注意这一道只管**写**：「看」结算单列表管理员也能看，
+    走的是 ``require_platform_settlement_viewer``。
 
     失败发生在**碰库之前**：角色不对的账号连「有几张待结算单」都问不到。
     """
     if current.role is not UserRole.PLATFORM_FINANCE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=FORBIDDEN_DETAIL,
+        )
+    return current
+
+
+async def require_platform_settlement_viewer(
+    current: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """FastAPI 依赖：要求当前用户能**看**平台结算单列表。
+
+    通过条件：角色是 PLATFORM_FINANCE 或 PLATFORM_ADMIN。
+    不满足 -> 403 Forbidden，消息与别处的越权失败一致。
+
+    与 ``require_platform_finance`` 的区别：那一道只放财务，
+    用于**确认结算**这类写钱的动作；这一道放行「看」——
+    平台管理员要能对账、核查服务商的结算情况。
+
+    失败同样发生在**碰库之前**：角色不对的账号连「有几张待结算单」
+    都问不到。
+    """
+    if current.role not in PLATFORM_SETTLEMENT_VIEW_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=FORBIDDEN_DETAIL,

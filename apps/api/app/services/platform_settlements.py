@@ -1,7 +1,7 @@
 """平台侧结算单列表 service（PLAT-03）。
 
-平台财务在这里看全平台的结算单：哪些还等着确认（``PENDING``）、
-哪些已经确认过（``CONFIRMED``），以及每个周期的金额三件套。
+平台侧（财务 / 管理员）在这里看全平台的结算单：哪些还等着确认
+（``PENDING``）、哪些已经确认过（``CONFIRMED``），以及每个周期的金额三件套。
 
 四条硬约束：
 
@@ -9,11 +9,11 @@
    确认结算是另一个动作（``app.services.settle.confirm_settlement``），
    两条路径不混——列表接口永远不写库。
 2. **身份只从 token 来**：函数签名里没有 operator 参数，
-   也不接受 user_id ——平台财务看的是全平台结算单，靠的是**角色**
-   （``require_platform_finance``），不是客户端自报。
+   也不接受 user_id ——看到的是全平台结算单，靠的是**角色**
+   （``require_platform_settlement_viewer``），不是客户端自报。
 3. **筛选是查询条件，不是隔离边界**：``status`` / ``provider_id``
-   不传就是全量。财务本来就能看全部结算单，所以这里没有「只能看自己家」
-   这种约束。
+   不传就是全量。平台侧角色本来就能看全部结算单，所以这里没有
+   「只能看自己家」这种约束。
 4. **分页有上限**：limit 收敛到 [1, MAX_PAGE_LIMIT]（上限 100），
    与用户侧 / 服务商侧 / 平台订单列表同一套口径。
 
@@ -88,9 +88,9 @@ async def list_platform_settlements(
     page: int = 1,
     limit: int = DEFAULT_PAGE_LIMIT,
 ) -> tuple[list[PlatformSettlementRow], int]:
-    """返回平台财务可见的结算单（一页 + 总数）。
+    """返回平台侧可见的结算单（一页 + 总数）。
 
-    ``status`` / ``provider_id`` 传 None 表示不按它过滤（财务看全量）。
+    ``status`` / ``provider_id`` 传 None 表示不按它过滤（平台侧看全量）。
     """
     page = max(page, 1)
     limit = min(max(limit, 1), MAX_PAGE_LIMIT)
@@ -133,7 +133,7 @@ async def list_settlement_providers(
     """返回筛选栏用的服务商选项（有过结算单的服务商）。
 
     **为什么要单独查**：平台侧的服务商列表接口（/api/v1/platform/providers）
-    只对平台管理员开放，而结算单列表是财务要用的——财务调不了那个接口。
+    只对平台管理员开放，而结算单列表财务也要用——财务调不了那个接口。
     所以列表接口自己带上筛选选项（与订单总览同一做法）。
 
     **选项不受状态筛选影响**：状态筛的是「哪几张单」，

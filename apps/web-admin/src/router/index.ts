@@ -81,7 +81,7 @@ export function buildRoutes(pinia: Pinia): RouteRecordRaw[] {
       name: "platform-settlements",
       component: () => import("@/views/PlatformSettlementsView.vue"),
       // 结算确认：平台财务与平台管理员都能进这页
-      // （数据接口后端只放 PLATFORM_FINANCE）
+      // （列表接口后端也放这两个角色；只有「确认结算」那一步限财务）
       meta: { requiresRoles: [PLATFORM_FINANCE, PLATFORM_ADMIN] },
     },
     {
