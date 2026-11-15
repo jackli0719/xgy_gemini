@@ -74,7 +74,7 @@ jobs:
       REQUIRE_INTEGRATION: "1"
       # 集成测试数量下限。与 infra/compose/docker-compose.dev.yml 里的
       # 同名值保持一致；新增集成测试时两边一起改。
-      EXPECTED_INTEGRATION_TESTS: "276"
+      EXPECTED_INTEGRATION_TESTS: "277"
     defaults:
       run:
         working-directory: apps/api
@@ -109,7 +109,10 @@ jobs:
         # 少了就是「集成测试整体不见了」，必须红。
         run: |
           set -euo pipefail
-          count=$(pytest --collect-only -q -m integration 2>/dev/null | grep -c '::' || true)
+          # 注意：不要再加 -q。pytest.ini 的 addopts 里已经有 -q，
+          # 再加一个就成了 -qq，收集结果会变成「每个文件一行计数」，
+          # 里面没有 "::"，下面的计数会数成 0（第一次 CI 就栽在这）。
+          count=$(pytest --collect-only -m integration 2>/dev/null | grep -c '::' || true)
           echo "集成测试收集到 $count 个，下限 $EXPECTED_INTEGRATION_TESTS"
           if [ "$count" -lt "$EXPECTED_INTEGRATION_TESTS" ]; then
             echo "::error::集成测试数 $count 少于下限 $EXPECTED_INTEGRATION_TESTS"
