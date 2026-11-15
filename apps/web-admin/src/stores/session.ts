@@ -13,6 +13,13 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
+// 导入时改名：store 里同名的 computed（isProviderRole）会遮住工具函数，
+// 直接 import 同名会让 computed 里拿到的是 ref 而不是函数。
+import {
+  isPlatformRole as roleIsPlatform,
+  isProviderRole as roleIsProvider,
+} from "@/utils/role";
+
 /** token 在 localStorage 里的键名。 */
 const TOKEN_KEY = "oto.web.token";
 /** 当前用户信息在 localStorage 里的键名。 */
@@ -53,6 +60,19 @@ export const useSessionStore = defineStore("session", () => {
    * 服务商侧接口对平台账号一律 403。
    */
   const isPlatformAdmin = computed(() => currentUser.value?.role === "PLATFORM_ADMIN");
+  /**
+   * 是否平台侧角色（平台管理员 / 平台运营）。
+   *
+   * 这两种角色能进平台侧页面（订单总览 / 品类管理）；
+   * 服务商侧页面（派单 / 师傅管理）对它们一律 403。
+   */
+  const isPlatformStaff = computed(() => roleIsPlatform(currentUser.value?.role));
+  /**
+   * 是否服务商侧角色（服务商管理员 / 员工）。
+   *
+   * 菜单按它过滤：平台账号看不到服务商菜单（PLAT-02 修的 UX 遗留）。
+   */
+  const isProviderRole = computed(() => roleIsProvider(currentUser.value?.role));
 
   function setToken(value: string): void {
     token.value = value;
@@ -77,6 +97,8 @@ export const useSessionStore = defineStore("session", () => {
     isLoggedIn,
     isProvider,
     isPlatformAdmin,
+    isPlatformStaff,
+    isProviderRole,
     setToken,
     setCurrentUser,
     clear,

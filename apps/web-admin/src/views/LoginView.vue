@@ -11,7 +11,7 @@
   - 跳回 redirect 指定的地方，没有 redirect 就回派单页。
 -->
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElButton, ElCard, ElForm, ElFormItem, ElInput } from "element-plus";
 
@@ -19,6 +19,7 @@ import { ApiError } from "@oto/shared/api";
 
 import { api } from "@/api";
 import { useSessionStore } from "@/stores/session";
+import { appTitleForRole } from "@/utils/role";
 
 const session = useSessionStore();
 const router = useRouter();
@@ -28,6 +29,18 @@ const phone = ref("");
 const code = ref("");
 const errorText = ref("");
 const submitting = ref(false);
+
+/**
+ * 登录页标题按角色显示（PLAT-02 修的 PLAT-01 遗留）。
+ *
+ * 依据的是会话里**上一次登录的那个账号**（落在 localStorage）：
+ * 平台账号登出后再回来，看到的仍然是「平台管理后台」，
+ * 而不是写着「服务商后台」的登录框——登录前就知道自己进的是哪个后台，
+ * 免得登进去才发现走错了地方。
+ *
+ * 没有任何会话信息时（第一次来）按默认的「服务商后台」显示。
+ */
+const title = computed(() => appTitleForRole(session.currentUser?.role));
 
 /**
  * redirect 只允许站内绝对路径。
@@ -83,7 +96,7 @@ async function submit(): Promise<void> {
   <div class="login-page">
     <el-card class="login-card">
       <template #header>
-        <span class="login-title">服务商后台登录</span>
+        <span class="login-title" data-test="login-title">{{ title }}</span>
       </template>
 
       <el-form label-width="80px" @submit.prevent="submit">

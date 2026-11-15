@@ -27,4 +27,16 @@ export const mockClient = {
   updateProviderStatus: vi.fn(),
   /** POST /api/v1/platform/providers/{provider_id}/admin */
   createProviderAdmin: vi.fn(),
+  /** GET /api/v1/platform/orders */
+  listPlatformOrders: vi.fn(),
+  /** GET /api/v1/platform/categories */
+  listPlatformCategories: vi.fn(),
+  /** POST /api/v1/platform/categories */
+  createPlatformCategory: vi.fn(),
+  /** PATCH /api/v1/platform/categories/{category_id} */
+  updatePlatformCategory: vi.fn(),
+  /** POST /api/v1/platform/items */
+  createPlatformItem: vi.fn(),
+  /** PATCH /api/v1/platform/items/{item_id} */
+  updatePlatformItem: vi.fn(),
 };

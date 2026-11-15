@@ -2,7 +2,22 @@
 
 Web 管理后台（Vue3 + Element Plus），平台端与服务商端共用，按 provider_id 隔离数据与菜单。
 
-当前进度（PLAT-01）：**平台侧服务商管理页**（服务商列表 / 新建 / 审核 / 冻结 / 建管理员账号）。
+当前进度（PLAT-02）：
+
+- **平台侧服务商管理页**（服务商列表 / 新建 / 审核 / 冻结 / 建管理员账号，PLAT-01）
+- **平台侧订单总览页**（全量订单，可按状态 / 服务商筛选，PLAT-02）
+- **平台侧品类管理页**（品类树 + 服务项列表，新建 / 编辑 / 改价，PLAT-02）
+
+平台侧页面分两种权限：
+
+| 页面 | 能进的角色 |
+| --- | --- |
+| `/platform/providers` 服务商管理 | `PLATFORM_ADMIN` |
+| `/platform/orders` 订单总览 | `PLATFORM_ADMIN` / `PLATFORM_OPS` |
+| `/platform/categories` 品类管理 | `PLATFORM_ADMIN` / `PLATFORM_OPS` |
+
+菜单与标题都按角色走：平台账号看的是「平台管理后台」，服务商账号看的是
+「服务商后台」，两边看到的菜单也不一样（PLAT-02 修的 PLAT-01 遗留）。
 
 ## 跑起来
 
@@ -19,21 +34,29 @@ make web-typecheck                # 类型检查（vue-tsc）
 
 | 路径 | 说明 |
 | --- | --- |
-| `src/router/index.ts` | 路由表 + 守卫：`/login`（公开）、`/provider/dispatch`（要 token）、`/platform/providers`（要 `PLATFORM_ADMIN` 角色） |
+| `src/router/index.ts` | 路由表 + 守卫：`/login`（公开）、`/provider/*`（要 token + 服务商角色）、`/platform/*`（要 token + 平台角色）；首页按角色落地 |
 | `src/stores/session.ts` | pinia 会话 store：token + currentUser（含 `provider_id`、`role`） |
+| `src/utils/role.ts` | 角色常量与判断（菜单 / 守卫 / 标题共用的同一份事实） |
 | `src/api/index.ts` | 唯一的 HTTP 出口，SDK 实例（`@oto/shared`） |
-| `src/views/LoginView.vue` | 登录页（薄壳，复用 FE-03 的 `/api/v1/auth/login`） |
+| `src/views/LoginView.vue` | 登录页（薄壳，复用 FE-03 的 `/api/v1/auth/login`），标题按角色显示 |
 | `src/views/ProviderDispatchView.vue` | 派单页：待派单列表 + 派单弹窗 |
 | `src/views/PlatformProvidersView.vue` | 平台侧服务商管理页：列表 + 新建 / 审核 / 冻结 / 建管理员 |
+| `src/views/PlatformOrdersView.vue` | 平台侧订单总览页：全量订单 + 状态 / 服务商筛选 + 分页 |
+| `src/views/PlatformCategoriesView.vue` | 平台侧品类管理页：品类树 + 服务项列表 + 新建 / 编辑 / 改价 |
 
 ## 三条边界
 
 1. **前端不带 `provider_id`**：服务商归属由后端按 token 决定
    （`require_provider_scope`）。前端就算往 query 里塞 `provider_id`
    也没用——接口压根没这个入参。
-2. **平台侧接口只认 `PLATFORM_ADMIN`**：路由守卫按 role 拦（菜单也按角色显示），
-   但那只是体验层——真正的边界在后端（`require_platform_admin`，角色不对一律 403）。
-   「管哪一个服务商」是路径参数 `provider_id`，**操作人身份永远只从 token 来**。
+2. **平台侧接口按角色分层**：服务商管理只认 `PLATFORM_ADMIN`
+   （`require_platform_admin`），订单总览与品类管理认 `PLATFORM_ADMIN` /
+   `PLATFORM_OPS`（`require_platform_staff`）。路由守卫按 role 拦
+   （菜单也按角色显示），但那只是体验层——真正的边界在后端，角色不对一律 403。
+   「管哪一个」是路径参数（`provider_id` / `category_id` / `item_id`），
+   **操作人身份永远只从 token 来**。
+   订单总览是**全量**（不按用户过滤）：平台特权来自角色，不是来自请求参数，
+   所以前端不传 `user_id`。
 3. **HTTP 只走 `@oto/shared` 的 SDK**：不手写 fetch。类型从
    `apps/api/openapi.json` 生成（`make openapi && npm run generate:api -w @oto/shared`），
    后端加了接口忘了重新导出，契约检查测试会先红。

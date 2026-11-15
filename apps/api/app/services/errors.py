@@ -30,6 +30,10 @@ __all__ = [
     "OrderNoConflictError",
     "OrderNotFoundError",
     "PlaceOrderError",
+    "PlatformCatalogConflictError",
+    "PlatformCatalogError",
+    "PlatformCatalogForbiddenError",
+    "PlatformCatalogNotFoundError",
     "PlatformProviderConflictError",
     "PlatformProviderError",
     "PlatformProviderForbiddenError",
@@ -345,5 +349,38 @@ class PlatformProviderStatusNotSettableError(PlatformProviderError):
 
     PENDING（待审核）是建档时的初始状态，平台不能把服务商改回待审核；
     两个废弃取值同理。客户端改请求内容才可能解决 -> 400，不是 409。
+    """
+
+
+class PlatformCatalogError(Exception):
+    """平台侧品类 / 服务项管理失败的业务异常基类。
+
+    与前七棵异常树平级：平台侧管目录（品类树 + 服务项 + 价格）
+    是一条独立链路，共用一个基类会让别的链路的兜底文案套到它头上。
+    """
+
+
+class PlatformCatalogNotFoundError(PlatformCatalogError):
+    """品类 / 服务项不存在。
+
+    平台侧管的是**全平台**的目录，不存在与「不属于我」不是一回事：
+    平台运营能看全部目录，所以这里只有「真的不存在」这一种。
+    """
+
+
+class PlatformCatalogConflictError(PlatformCatalogError):
+    """条件 UPDATE 没命中（并发冲突）。
+
+    改品类 / 服务项走的是「条件 UPDATE」：``WHERE id = ? AND status = 期望旧状态``。
+    没命中说明这一行的状态已经被别人改过了（乐观锁冲突），
+    客户端刷新后重试就行 -> 409。
+    """
+
+
+class PlatformCatalogForbiddenError(PlatformCatalogError):
+    """当前账号不能管理目录。
+
+    典型场景：角色不是 PLATFORM_ADMIN / PLATFORM_OPS。正常情况下依赖层
+    （``require_platform_staff``）已经挡住了，这里是 service 层的兜底。
     """
 

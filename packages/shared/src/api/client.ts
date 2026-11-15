@@ -118,6 +118,12 @@ type ListPlatformProvidersOp = operations["list_platform_providers_api_v1_platfo
 type CreatePlatformProviderOp = operations["create_platform_provider_api_v1_platform_providers_post"];
 type UpdatePlatformProviderStatusOp = operations["update_platform_provider_status_api_v1_platform_providers__provider_id__patch"];
 type CreatePlatformProviderAdminOp = operations["create_platform_provider_admin_api_v1_platform_providers__provider_id__admin_post"];
+type ListPlatformOrdersOp = operations["list_platform_orders_api_v1_platform_orders_get"];
+type ListPlatformCategoriesOp = operations["list_platform_categories_api_v1_platform_categories_get"];
+type CreatePlatformCategoryOp = operations["create_platform_category_api_v1_platform_categories_post"];
+type UpdatePlatformCategoryOp = operations["update_platform_category_api_v1_platform_categories__category_id__patch"];
+type CreatePlatformItemOp = operations["create_platform_item_api_v1_platform_items_post"];
+type UpdatePlatformItemOp = operations["update_platform_item_api_v1_platform_items__item_id__patch"];
 
 
 /** 从错误响应体里挑出文案。 */
@@ -469,6 +475,86 @@ export function createApiClient(options: ApiClientOptions = {}) {
       return send<CreatePlatformProviderAdminOp>(
         "POST",
         `/api/v1/platform/providers/${encodeURIComponent(String(params.provider_id))}/admin`,
+        { body },
+      );
+    },
+
+    // -----------------------------------------------------------------
+    // 平台侧：订单总览 + 目录管理
+    //
+    // 这几个接口 PLATFORM_ADMIN / PLATFORM_OPS 都能调（服务端按 token 里的
+    // 角色判）。订单总览是**全量**（不按用户过滤），这是平台侧的特权，
+    // 来自角色而不是来自请求参数——所以这里也没有 user_id。
+    // -----------------------------------------------------------------
+
+    /**
+     * 平台订单总览（全量，可按状态 / 服务商筛选）。
+     *
+     * `status` / `provider_id` 省略表示不按它筛选。
+     */
+    listPlatformOrders(
+      params: QueryParamsOf<ListPlatformOrdersOp> = {},
+    ): Promise<ResponseOf<ListPlatformOrdersOp>> {
+      return send<ListPlatformOrdersOp>("GET", "/api/v1/platform/orders", {
+        query: {
+          status: params.status ?? undefined,
+          provider_id: params.provider_id ?? undefined,
+          page: params.page,
+          limit: params.limit,
+        },
+      });
+    },
+
+    /** 品类树（含子品类与各品类下的服务项，含已停用的）。 */
+    listPlatformCategories(): Promise<ResponseOf<ListPlatformCategoriesOp>> {
+      return send<ListPlatformCategoriesOp>("GET", "/api/v1/platform/categories");
+    },
+
+    /** 新建品类（初始状态「启用」，状态不由请求体决定）。 */
+    createPlatformCategory(
+      body: RequestBodyOf<CreatePlatformCategoryOp>,
+    ): Promise<ResponseOf<CreatePlatformCategoryOp>> {
+      return send<CreatePlatformCategoryOp>("POST", "/api/v1/platform/categories", {
+        body,
+      });
+    },
+
+    /**
+     * 改品类（名称 / 排序 / 状态）。
+     *
+     * `expected_status` 是乐观锁：带上「我以为的旧状态」，
+     * 服务端发现实际状态已经变了就返回 409。
+     */
+    updatePlatformCategory(
+      params: PathParamsOf<UpdatePlatformCategoryOp>,
+      body: RequestBodyOf<UpdatePlatformCategoryOp>,
+    ): Promise<ResponseOf<UpdatePlatformCategoryOp>> {
+      return send<UpdatePlatformCategoryOp>(
+        "PATCH",
+        `/api/v1/platform/categories/${encodeURIComponent(String(params.category_id))}`,
+        { body },
+      );
+    },
+
+    /** 新建服务项（入参含品类 id、名称、基准价、时长）。 */
+    createPlatformItem(
+      body: RequestBodyOf<CreatePlatformItemOp>,
+    ): Promise<ResponseOf<CreatePlatformItemOp>> {
+      return send<CreatePlatformItemOp>("POST", "/api/v1/platform/items", { body });
+    },
+
+    /**
+     * 改服务项（名称 / 基准价 / 时长 / 状态）。
+     *
+     * 改价会写审计日志（服务端的事，前端不用管）。
+     */
+    updatePlatformItem(
+      params: PathParamsOf<UpdatePlatformItemOp>,
+      body: RequestBodyOf<UpdatePlatformItemOp>,
+    ): Promise<ResponseOf<UpdatePlatformItemOp>> {
+      return send<UpdatePlatformItemOp>(
+        "PATCH",
+        `/api/v1/platform/items/${encodeURIComponent(String(params.item_id))}`,
         { body },
       );
     },

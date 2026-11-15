@@ -43,6 +43,7 @@ __all__ = [
     "is_valid_role_provider_pair",
     "require_master_scope",
     "require_platform_admin",
+    "require_platform_staff",
     "require_provider_scope",
 ]
 
@@ -56,6 +57,13 @@ FORBIDDEN_DETAIL = "Forbidden"
 
 # 服务商侧角色：只有这两种角色带 provider_id，也只有这两种角色能进服务商作用域。
 PROVIDER_ROLES = frozenset({UserRole.PROVIDER_ADMIN, UserRole.PROVIDER_STAFF})
+
+# 平台侧「运营」角色：PLATFORM_ADMIN 与 PLATFORM_OPS。
+#
+# 这两种角色能进平台侧的**只读总览**（订单总览）与**目录管理**（品类 / 服务项）。
+# 它们与服务商侧一样不带 provider_id（数据库 CHECK 约束强制），
+# 所以在平台上看到的不是「某一家的数据」，而是全平台的数据。
+PLATFORM_STAFF_ROLES = frozenset({UserRole.PLATFORM_ADMIN, UserRole.PLATFORM_OPS})
 
 # 缺少 header 时同样要 401。
 # 这里用 Header(default=None) 而不是 Header(...):
@@ -220,6 +228,30 @@ async def require_platform_admin(
     平台管理员不属于任何一家服务商，租户隔离对它没有意义。
     """
     if current.role is not UserRole.PLATFORM_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=FORBIDDEN_DETAIL,
+        )
+    return current
+
+
+async def require_platform_staff(
+    current: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """FastAPI 依赖：要求当前用户是平台侧运营角色（PLATFORM_ADMIN / PLATFORM_OPS）。
+
+    通过条件：角色在这两个平台侧角色里。不满足 -> 403 Forbidden，
+    消息与别处的越权失败一致（不区分「角色不对」还是「没带归属」）。
+
+    与 ``require_platform_admin`` 的区别：那一道只放 PLATFORM_ADMIN
+    （服务商入驻 / 冻结是管理动作）；这一道多放一个 PLATFORM_OPS
+    （平台运营：看订单总览、管品类与服务项）。
+
+    这两个角色都**不带 provider_id**（数据库 CHECK 约束强制），
+    所以它们看到的是全平台的数据——这是平台侧的特权，不是越权：
+    边界在「角色」上，不在「归属」上。
+    """
+    if current.role not in PLATFORM_STAFF_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=FORBIDDEN_DETAIL,

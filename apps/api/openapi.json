@@ -1876,6 +1876,435 @@
         }
       }
     },
+    "/api/v1/platform/orders": {
+      "get": {
+        "tags": [
+          "platform-orders"
+        ],
+        "summary": "平台订单总览（全量，可按状态 / 服务商筛选）",
+        "description": "列出平台侧可见的全部订单。\n\n**不带 user_id 过滤**：平台看的是全量订单。",
+        "operationId": "list_platform_orders_api_v1_platform_orders_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OrderStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按订单状态过滤，不传=全部",
+              "title": "Status"
+            },
+            "description": "按订单状态过滤，不传=全部"
+          },
+          {
+            "name": "provider_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按服务商过滤，不传=全部",
+              "title": "Provider Id"
+            },
+            "description": "按服务商过滤，不传=全部"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "每页条数，默认 20，上限 100（超过按 100 算）",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，默认 20，上限 100（超过按 100 算）"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformOrderListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/categories": {
+      "get": {
+        "tags": [
+          "platform-catalog"
+        ],
+        "summary": "品类树（含子品类与各品类下的服务项）",
+        "description": "返回品类树。\n\n**含已停用的品类与服务项**：平台侧要能看见停用的东西，\n否则没法把它们重新启用。",
+        "operationId": "list_platform_categories_api_v1_platform_categories_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlatformCategoryNode"
+                  },
+                  "title": "Response List Platform Categories Api V1 Platform Categories Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "platform-catalog"
+        ],
+        "summary": "新建品类（初始状态：启用）",
+        "description": "新建一个品类。\n\n状态**不由请求体决定**：新建一律启用，要停用再调改接口。",
+        "operationId": "create_platform_category_api_v1_platform_categories_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformCategoryNode"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/categories/{category_id}": {
+      "patch": {
+        "tags": [
+          "platform-catalog"
+        ],
+        "summary": "改品类（名称 / 排序 / 状态）",
+        "description": "把品类改成指定的样子。\n\n状态被别人改过（expected_status 对不上）-> 409。\n品类不存在 -> 404。",
+        "operationId": "update_platform_category_api_v1_platform_categories__category_id__patch",
+        "parameters": [
+          {
+            "name": "category_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "品类 ID",
+              "title": "Category Id"
+            },
+            "description": "品类 ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCategoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformCategoryNode"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/items": {
+      "post": {
+        "tags": [
+          "platform-catalog"
+        ],
+        "summary": "新建服务项",
+        "description": "在某个品类下新建一个服务项。\n\n品类不存在 -> 404。",
+        "operationId": "create_platform_item_api_v1_platform_items_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateServiceItemRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformServiceItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/items/{item_id}": {
+      "patch": {
+        "tags": [
+          "platform-catalog"
+        ],
+        "summary": "改服务项（名称 / 基准价 / 时长 / 状态）",
+        "description": "把服务项改成指定的样子。\n\n**改价会留痕**：base_price 的 old / new 值都写进 audit_log（R3）。\n状态被别人改过（expected_status 对不上）-> 409。\n服务项不存在 -> 404。",
+        "operationId": "update_platform_item_api_v1_platform_items__item_id__patch",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "服务项 ID",
+              "title": "Item Id"
+            },
+            "description": "服务项 ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateServiceItemRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformServiceItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -2072,6 +2501,15 @@
         "title": "AddressUpdateRequest",
         "description": "修改地址的请求体。\n\nPUT 是**整体替换**：四个字段都要给全，不用给就说明客户端以为它是增量更新，\n那就该用 PATCH。与新建同构，所以直接继承新建的字段定义。"
       },
+      "CatalogStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "INACTIVE"
+        ],
+        "title": "CatalogStatus",
+        "description": "服务分类 / 服务项目状态。"
+      },
       "CategoryNode": {
         "properties": {
           "id": {
@@ -2161,6 +2599,45 @@
         "title": "ConfirmSettlementResult",
         "description": "确认结算后的结算单状态。"
       },
+      "CreateCategoryRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "description": "品类名称"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id",
+            "description": "父品类 ID；一级品类不传（或传 null）"
+          },
+          "sort_order": {
+            "type": "integer",
+            "maximum": 9999.0,
+            "minimum": 0.0,
+            "title": "Sort Order",
+            "description": "排序值（小的排前面）",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateCategoryRequest",
+        "description": "新建品类的请求体。\n\n**状态不在请求体里**：新建一律「启用」（ACTIVE），\n要停用再调改接口（与服务商建档同一思路）。"
+      },
       "CreateProviderAdminRequest": {
         "properties": {
           "phone": {
@@ -2218,6 +2695,53 @@
         ],
         "title": "CreateProviderRequest",
         "description": "新建服务商的请求体。\n\n**只有这三个字段**：服务商归属（也就是「归谁管」）由平台侧决定，\n不在请求体里；状态也不在——新建一律「待审核」（PENDING），\n要审核通过再调改状态接口。"
+      },
+      "CreateServiceItemRequest": {
+        "properties": {
+          "category_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Category Id",
+            "description": "归属的品类 ID"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "description": "服务项名称"
+          },
+          "base_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Base Price",
+            "description": "基准价"
+          },
+          "duration_min": {
+            "type": "integer",
+            "maximum": 1440.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Duration Min",
+            "description": "服务时长（分钟）"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "category_id",
+          "name",
+          "base_price",
+          "duration_min"
+        ],
+        "title": "CreateServiceItemRequest",
+        "description": "新建服务项的请求体。\n\n价格是**基准价**：下单时按它算金额（实际金额由服务端算，\n见 app.domain.pricing），所以它属于要留痕的字段（R3）。"
       },
       "DispatchRequest": {
         "properties": {
@@ -2970,6 +3494,227 @@
         "title": "PlaceOrderRequest",
         "description": "下单请求体。\n\n字段集合就是 ``{item_id, slot_id, address_id}``，多一个少一个都算破坏契约\n（有测试盯着）。"
       },
+      "PlatformCategoryNode": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "品类 ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "品类名称"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id",
+            "description": "父品类 ID；一级品类为空"
+          },
+          "sort_order": {
+            "type": "integer",
+            "title": "Sort Order",
+            "description": "排序值（小的排前面）"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CatalogStatus",
+            "description": "品类状态"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformServiceItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "直接归属本品类的服务项（含已停用）"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformCategoryNode"
+            },
+            "type": "array",
+            "title": "Children",
+            "description": "子品类"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "parent_id",
+          "sort_order",
+          "status",
+          "items",
+          "children"
+        ],
+        "title": "PlatformCategoryNode",
+        "description": "品类树上的一个节点（含子树与本品类下的服务项）。\n\n服务项挂在节点上而不是单独一个接口：后台的品类页要同时看到\n「有哪些品类」和「每个品类下有哪些服务项」，一次请求拿全，\n少一次往返，也不会出现「树加载完了、服务项还在转圈」的中间态。"
+      },
+      "PlatformOrderItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "订单 ID"
+          },
+          "order_no": {
+            "type": "string",
+            "title": "Order No",
+            "description": "订单号"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus",
+            "description": "订单状态"
+          },
+          "pay_status": {
+            "$ref": "#/components/schemas/PayStatus",
+            "description": "支付状态"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount",
+            "description": "订单金额"
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "下单用户 ID（平台看全量，不做用户过滤）"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Id",
+            "description": "归属的服务商 ID；还没派单时为空"
+          },
+          "provider_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Name",
+            "description": "服务商名称；还没派单时为空"
+          },
+          "item_id": {
+            "type": "integer",
+            "title": "Item Id",
+            "description": "服务项 ID"
+          },
+          "item_name": {
+            "type": "string",
+            "title": "Item Name",
+            "description": "服务项名称"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "下单时间"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "order_no",
+          "status",
+          "pay_status",
+          "amount",
+          "user_id",
+          "provider_id",
+          "provider_name",
+          "item_id",
+          "item_name",
+          "created_at"
+        ],
+        "title": "PlatformOrderItem",
+        "description": "平台侧看到的一条订单。"
+      },
+      "PlatformOrderListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformOrderItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "当前页的订单"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "符合筛选条件的订单总数（不受分页影响）"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "当前页码（从 1 开始）"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "本次生效的每页条数（上限 100）"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/PlatformOrderProviderOption"
+            },
+            "type": "array",
+            "title": "Providers",
+            "description": "筛选栏用的服务商列表（有过订单的服务商）——放在这里是因为平台侧的服务商列表接口只对平台管理员开放，而订单总览平台运营也要能筛"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit",
+          "providers"
+        ],
+        "title": "PlatformOrderListResponse",
+        "description": "订单总览（一页 + 总数 + 筛选用的服务商列表）。"
+      },
+      "PlatformOrderProviderOption": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "服务商 ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "服务商名称"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "PlatformOrderProviderOption",
+        "description": "筛选栏里的一个服务商选项。"
+      },
       "PlatformProviderItem": {
         "properties": {
           "id": {
@@ -3052,6 +3797,58 @@
         ],
         "title": "PlatformProviderListResponse",
         "description": "服务商列表（一页 + 总数）。"
+      },
+      "PlatformServiceItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "服务项 ID"
+          },
+          "category_id": {
+            "type": "integer",
+            "title": "Category Id",
+            "description": "归属的品类 ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "服务项名称"
+          },
+          "base_price": {
+            "type": "string",
+            "title": "Base Price",
+            "description": "基准价"
+          },
+          "duration_min": {
+            "type": "integer",
+            "title": "Duration Min",
+            "description": "服务时长（分钟）"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CatalogStatus",
+            "description": "服务项状态"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "建档时间"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "category_id",
+          "name",
+          "base_price",
+          "duration_min",
+          "status",
+          "created_at"
+        ],
+        "title": "PlatformServiceItem",
+        "description": "平台侧看到的一条服务项。"
       },
       "ProviderAdminItem": {
         "properties": {
@@ -3498,6 +4295,64 @@
         "title": "SlotAvailability",
         "description": "某个时段的可预约情况。\n\n``available`` = capacity - used，只返回 available > 0 的时段。\n容量与已占用数一起返回，是为了让前端能显示「还剩几个」，\n而不是让前端自己算一遍（两边的口径容易不一致）。"
       },
+      "UpdateCategoryRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "品类名称"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9999.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order",
+            "description": "排序值"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "品类状态"
+          },
+          "expected_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "调用方以为的旧状态；与服务端读到的不一致时返回 409"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateCategoryRequest",
+        "description": "改品类的请求体。\n\n至少要改一个字段——三个都不传就是空操作，没有意义（直接 422）。\n\n``expected_status`` 是**乐观锁**：带上「我以为的旧状态」，\n服务端发现实际状态已经变了就返回 409（谁先改谁赢，后改的拿到冲突）。\n不传就用服务端刚读到的旧状态。"
+      },
       "UpdateMasterStatusRequest": {
         "properties": {
           "status": {
@@ -3527,6 +4382,80 @@
         ],
         "title": "UpdateProviderStatusRequest",
         "description": "改服务商状态的请求体。\n\n``status`` 用的是**窄枚举** ``SettableProviderStatus``（ACTIVE / FROZEN），\n所以接口这一层就把「PENDING 不许设置」变成 422。\n但这只是一道防线：service 那边按同一份枚举再挡一次\n（见 app.services.platform_provider），免得有人绕过接口层直接调 service。"
+      },
+      "UpdateServiceItemRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "服务项名称"
+          },
+          "base_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Price",
+            "description": "基准价"
+          },
+          "duration_min": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1440.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Min",
+            "description": "服务时长（分钟）"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "服务项状态"
+          },
+          "expected_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "调用方以为的旧状态；与服务端读到的不一致时返回 409"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateServiceItemRequest",
+        "description": "改服务项的请求体。\n\n至少要改一个字段。``expected_status`` 的语义同\n``UpdateCategoryRequest.expected_status``。"
       },
       "UserRole": {
         "type": "string",

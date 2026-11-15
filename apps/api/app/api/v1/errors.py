@@ -43,6 +43,10 @@ from app.services.errors import (
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
+    PlatformCatalogConflictError,
+    PlatformCatalogError,
+    PlatformCatalogForbiddenError,
+    PlatformCatalogNotFoundError,
     PlatformProviderConflictError,
     PlatformProviderError,
     PlatformProviderForbiddenError,
@@ -67,6 +71,7 @@ __all__ = [
     "GENERIC_DETAIL",
     "MASTER_ACTION_GENERIC_DETAIL",
     "MASTER_QUERY_GENERIC_DETAIL",
+    "PLATFORM_CATALOG_GENERIC_DETAIL",
     "PLATFORM_PROVIDER_GENERIC_DETAIL",
     "SERVICE_FLOW_GENERIC_DETAIL",
     "SETTLEMENT_GENERIC_DETAIL",
@@ -75,6 +80,7 @@ __all__ = [
     "master_action_error_handler",
     "master_query_error_handler",
     "place_order_error_handler",
+    "platform_catalog_error_handler",
     "platform_provider_error_handler",
     "service_flow_error_handler",
     "settlement_error_handler",
@@ -145,6 +151,13 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     # 平台侧服务商管理：请求的状态不允许被设置（PENDING 等）
     # 客户端改请求内容才可能解决 -> 400
     PlatformProviderStatusNotSettableError: 400,
+    # 平台侧品类 / 服务项管理：品类或服务项不存在
+    PlatformCatalogNotFoundError: 404,
+    # 平台侧品类 / 服务项管理：条件 UPDATE 没命中（并发冲突）
+    # 刷新后重试就行 -> 409
+    PlatformCatalogConflictError: 409,
+    # 平台侧品类 / 服务项管理：角色不对（依赖层已经挡住，这里是 service 兜底）
+    PlatformCatalogForbiddenError: 403,
     # 兜底：其余业务异常
     PlaceOrderError: 400,
     DispatchError: 400,
@@ -154,6 +167,7 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     SettlementError: 400,
     CatalogError: 400,
     PlatformProviderError: 400,
+    PlatformCatalogError: 400,
 }
 
 # 兜底文案。用于 PlaceOrderError 基类——它的消息可能内嵌数据库错误原文
@@ -180,6 +194,9 @@ CATALOG_GENERIC_DETAIL = "查询失败"
 
 # 平台侧服务商管理的兜底文案
 PLATFORM_PROVIDER_GENERIC_DETAIL = "服务商管理失败"
+
+# 平台侧品类 / 服务项管理的兜底文案
+PLATFORM_CATALOG_GENERIC_DETAIL = "目录管理失败"
 
 
 def status_for(exc: BaseException) -> int:
@@ -319,6 +336,22 @@ async def platform_provider_error_handler(request: Request, exc: Exception) -> J
         PLATFORM_PROVIDER_GENERIC_DETAIL
         if type(exc) is PlatformProviderError
         else (str(exc) or PLATFORM_PROVIDER_GENERIC_DETAIL)
+    )
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )
+
+
+async def platform_catalog_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把平台侧品类 / 服务项管理相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = (
+        PLATFORM_CATALOG_GENERIC_DETAIL
+        if type(exc) is PlatformCatalogError
+        else (str(exc) or PLATFORM_CATALOG_GENERIC_DETAIL)
     )
     return JSONResponse(
         status_code=status_for(exc),

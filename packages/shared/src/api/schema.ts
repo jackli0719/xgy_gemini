@@ -566,6 +566,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 平台订单总览（全量，可按状态 / 服务商筛选）
+         * @description 列出平台侧可见的全部订单。
+         *
+         *     **不带 user_id 过滤**：平台看的是全量订单。
+         */
+        get: operations["list_platform_orders_api_v1_platform_orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 品类树（含子品类与各品类下的服务项）
+         * @description 返回品类树。
+         *
+         *     **含已停用的品类与服务项**：平台侧要能看见停用的东西，
+         *     否则没法把它们重新启用。
+         */
+        get: operations["list_platform_categories_api_v1_platform_categories_get"];
+        put?: never;
+        /**
+         * 新建品类（初始状态：启用）
+         * @description 新建一个品类。
+         *
+         *     状态**不由请求体决定**：新建一律启用，要停用再调改接口。
+         */
+        post: operations["create_platform_category_api_v1_platform_categories_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/categories/{category_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 改品类（名称 / 排序 / 状态）
+         * @description 把品类改成指定的样子。
+         *
+         *     状态被别人改过（expected_status 对不上）-> 409。
+         *     品类不存在 -> 404。
+         */
+        patch: operations["update_platform_category_api_v1_platform_categories__category_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/platform/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 新建服务项
+         * @description 在某个品类下新建一个服务项。
+         *
+         *     品类不存在 -> 404。
+         */
+        post: operations["create_platform_item_api_v1_platform_items_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 改服务项（名称 / 基准价 / 时长 / 状态）
+         * @description 把服务项改成指定的样子。
+         *
+         *     **改价会留痕**：base_price 的 old / new 值都写进 audit_log（R3）。
+         *     状态被别人改过（expected_status 对不上）-> 409。
+         *     服务项不存在 -> 404。
+         */
+        patch: operations["update_platform_item_api_v1_platform_items__item_id__patch"];
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -699,6 +819,12 @@ export interface components {
             detail: string;
         };
         /**
+         * CatalogStatus
+         * @description 服务分类 / 服务项目状态。
+         * @enum {string}
+         */
+        CatalogStatus: "ACTIVE" | "INACTIVE";
+        /**
          * CategoryNode
          * @description 品类节点（含子品类）。
          *
@@ -756,6 +882,31 @@ export interface components {
             confirmed_at?: string | null;
         };
         /**
+         * CreateCategoryRequest
+         * @description 新建品类的请求体。
+         *
+         *     **状态不在请求体里**：新建一律「启用」（ACTIVE），
+         *     要停用再调改接口（与服务商建档同一思路）。
+         */
+        CreateCategoryRequest: {
+            /**
+             * Name
+             * @description 品类名称
+             */
+            name: string;
+            /**
+             * Parent Id
+             * @description 父品类 ID；一级品类不传（或传 null）
+             */
+            parent_id?: number | null;
+            /**
+             * Sort Order
+             * @description 排序值（小的排前面）
+             * @default 0
+             */
+            sort_order: number;
+        };
+        /**
          * CreateProviderAdminRequest
          * @description 给某个服务商建管理员账号的请求体。
          *
@@ -793,6 +944,35 @@ export interface components {
              * @description 佣金比例（0~1，例如 0.15 表示 15%）
              */
             commission_rate: number | string;
+        };
+        /**
+         * CreateServiceItemRequest
+         * @description 新建服务项的请求体。
+         *
+         *     价格是**基准价**：下单时按它算金额（实际金额由服务端算，
+         *     见 app.domain.pricing），所以它属于要留痕的字段（R3）。
+         */
+        CreateServiceItemRequest: {
+            /**
+             * Category Id
+             * @description 归属的品类 ID
+             */
+            category_id: number;
+            /**
+             * Name
+             * @description 服务项名称
+             */
+            name: string;
+            /**
+             * Base Price
+             * @description 基准价
+             */
+            base_price: number | string;
+            /**
+             * Duration Min
+             * @description 服务时长（分钟）
+             */
+            duration_min: number;
         };
         /**
          * DispatchRequest
@@ -1347,6 +1527,151 @@ export interface components {
             address_id: number;
         };
         /**
+         * PlatformCategoryNode
+         * @description 品类树上的一个节点（含子树与本品类下的服务项）。
+         *
+         *     服务项挂在节点上而不是单独一个接口：后台的品类页要同时看到
+         *     「有哪些品类」和「每个品类下有哪些服务项」，一次请求拿全，
+         *     少一次往返，也不会出现「树加载完了、服务项还在转圈」的中间态。
+         */
+        PlatformCategoryNode: {
+            /**
+             * Id
+             * @description 品类 ID
+             */
+            id: number;
+            /**
+             * Name
+             * @description 品类名称
+             */
+            name: string;
+            /**
+             * Parent Id
+             * @description 父品类 ID；一级品类为空
+             */
+            parent_id: number | null;
+            /**
+             * Sort Order
+             * @description 排序值（小的排前面）
+             */
+            sort_order: number;
+            /** @description 品类状态 */
+            status: components["schemas"]["CatalogStatus"];
+            /**
+             * Items
+             * @description 直接归属本品类的服务项（含已停用）
+             */
+            items: components["schemas"]["PlatformServiceItem"][];
+            /**
+             * Children
+             * @description 子品类
+             */
+            children: components["schemas"]["PlatformCategoryNode"][];
+        };
+        /**
+         * PlatformOrderItem
+         * @description 平台侧看到的一条订单。
+         */
+        PlatformOrderItem: {
+            /**
+             * Id
+             * @description 订单 ID
+             */
+            id: number;
+            /**
+             * Order No
+             * @description 订单号
+             */
+            order_no: string;
+            /** @description 订单状态 */
+            status: components["schemas"]["OrderStatus"];
+            /** @description 支付状态 */
+            pay_status: components["schemas"]["PayStatus"];
+            /**
+             * Amount
+             * @description 订单金额
+             */
+            amount: string;
+            /**
+             * User Id
+             * @description 下单用户 ID（平台看全量，不做用户过滤）
+             */
+            user_id: number;
+            /**
+             * Provider Id
+             * @description 归属的服务商 ID；还没派单时为空
+             */
+            provider_id: number | null;
+            /**
+             * Provider Name
+             * @description 服务商名称；还没派单时为空
+             */
+            provider_name: string | null;
+            /**
+             * Item Id
+             * @description 服务项 ID
+             */
+            item_id: number;
+            /**
+             * Item Name
+             * @description 服务项名称
+             */
+            item_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 下单时间
+             */
+            created_at: string;
+        };
+        /**
+         * PlatformOrderListResponse
+         * @description 订单总览（一页 + 总数 + 筛选用的服务商列表）。
+         */
+        PlatformOrderListResponse: {
+            /**
+             * Items
+             * @description 当前页的订单
+             */
+            items: components["schemas"]["PlatformOrderItem"][];
+            /**
+             * Total
+             * @description 符合筛选条件的订单总数（不受分页影响）
+             */
+            total: number;
+            /**
+             * Page
+             * @description 当前页码（从 1 开始）
+             */
+            page: number;
+            /**
+             * Limit
+             * @description 本次生效的每页条数（上限 100）
+             */
+            limit: number;
+            /**
+             * Providers
+             * @description 筛选栏用的服务商列表（有过订单的服务商）——放在这里是因为平台侧的服务商列表接口只对平台管理员开放，而订单总览平台运营也要能筛
+             */
+            providers: components["schemas"]["PlatformOrderProviderOption"][];
+        };
+        /**
+         * PlatformOrderProviderOption
+         * @description 筛选栏里的一个服务商选项。
+         */
+        PlatformOrderProviderOption: {
+            /**
+             * Id
+             * @description 服务商 ID
+             */
+            id: number;
+            /**
+             * Name
+             * @description 服务商名称
+             */
+            name: string;
+        };
+        /**
          * PlatformProviderItem
          * @description 平台侧看到的一条服务商。
          */
@@ -1405,6 +1730,45 @@ export interface components {
              * @description 本次生效的每页条数（上限 100）
              */
             limit: number;
+        };
+        /**
+         * PlatformServiceItem
+         * @description 平台侧看到的一条服务项。
+         */
+        PlatformServiceItem: {
+            /**
+             * Id
+             * @description 服务项 ID
+             */
+            id: number;
+            /**
+             * Category Id
+             * @description 归属的品类 ID
+             */
+            category_id: number;
+            /**
+             * Name
+             * @description 服务项名称
+             */
+            name: string;
+            /**
+             * Base Price
+             * @description 基准价
+             */
+            base_price: string;
+            /**
+             * Duration Min
+             * @description 服务时长（分钟）
+             */
+            duration_min: number;
+            /** @description 服务项状态 */
+            status: components["schemas"]["CatalogStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             * @description 建档时间
+             */
+            created_at: string;
         };
         /**
          * ProviderAdminItem
@@ -1760,6 +2124,32 @@ export interface components {
             available: number;
         };
         /**
+         * UpdateCategoryRequest
+         * @description 改品类的请求体。
+         *
+         *     至少要改一个字段——三个都不传就是空操作，没有意义（直接 422）。
+         *
+         *     ``expected_status`` 是**乐观锁**：带上「我以为的旧状态」，
+         *     服务端发现实际状态已经变了就返回 409（谁先改谁赢，后改的拿到冲突）。
+         *     不传就用服务端刚读到的旧状态。
+         */
+        UpdateCategoryRequest: {
+            /**
+             * Name
+             * @description 品类名称
+             */
+            name?: string | null;
+            /**
+             * Sort Order
+             * @description 排序值
+             */
+            sort_order?: number | null;
+            /** @description 品类状态 */
+            status?: components["schemas"]["CatalogStatus"] | null;
+            /** @description 调用方以为的旧状态；与服务端读到的不一致时返回 409 */
+            expected_status?: components["schemas"]["CatalogStatus"] | null;
+        };
+        /**
          * UpdateMasterStatusRequest
          * @description 改师傅状态的请求体。
          *
@@ -1788,6 +2178,34 @@ export interface components {
         UpdateProviderStatusRequest: {
             /** @description 要把服务商改成什么状态 */
             status: components["schemas"]["SettableProviderStatus"];
+        };
+        /**
+         * UpdateServiceItemRequest
+         * @description 改服务项的请求体。
+         *
+         *     至少要改一个字段。``expected_status`` 的语义同
+         *     ``UpdateCategoryRequest.expected_status``。
+         */
+        UpdateServiceItemRequest: {
+            /**
+             * Name
+             * @description 服务项名称
+             */
+            name?: string | null;
+            /**
+             * Base Price
+             * @description 基准价
+             */
+            base_price?: number | string | null;
+            /**
+             * Duration Min
+             * @description 服务时长（分钟）
+             */
+            duration_min?: number | null;
+            /** @description 服务项状态 */
+            status?: components["schemas"]["CatalogStatus"] | null;
+            /** @description 调用方以为的旧状态；与服务端读到的不一致时返回 409 */
+            expected_status?: components["schemas"]["CatalogStatus"] | null;
         };
         /**
          * UserRole
@@ -2819,6 +3237,223 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderAdminItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_platform_orders_api_v1_platform_orders_get: {
+        parameters: {
+            query?: {
+                /** @description 按订单状态过滤，不传=全部 */
+                status?: components["schemas"]["OrderStatus"] | null;
+                /** @description 按服务商过滤，不传=全部 */
+                provider_id?: number | null;
+                /** @description 页码，从 1 开始 */
+                page?: number;
+                /** @description 每页条数，默认 20，上限 100（超过按 100 算） */
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformOrderListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_platform_categories_api_v1_platform_categories_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformCategoryNode"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_platform_category_api_v1_platform_categories_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCategoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformCategoryNode"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_platform_category_api_v1_platform_categories__category_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 品类 ID */
+                category_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateCategoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformCategoryNode"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_platform_item_api_v1_platform_items_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateServiceItemRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformServiceItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_platform_item_api_v1_platform_items__item_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 服务项 ID */
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateServiceItemRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformServiceItem"];
                 };
             };
             /** @description Validation Error */

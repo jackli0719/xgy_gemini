@@ -62,6 +62,10 @@ from app.services.errors import (
     OrderNoConflictError,
     OrderNotFoundError,
     PlaceOrderError,
+    PlatformCatalogConflictError,
+    PlatformCatalogError,
+    PlatformCatalogForbiddenError,
+    PlatformCatalogNotFoundError,
     PlatformProviderConflictError,
     PlatformProviderError,
     PlatformProviderForbiddenError,
@@ -221,6 +225,12 @@ def test_exception_status_map_contents() -> None:
         PlatformProviderForbiddenError: 403,
         PlatformProviderConflictError: 409,
         PlatformProviderError: 400,
+        # 平台侧目录管理（PLAT-02：品类 / 服务项 / 改价）
+        PlatformCatalogNotFoundError: 404,
+        # 条件 UPDATE 没命中（并发冲突）-> 刷新后重试
+        PlatformCatalogConflictError: 409,
+        PlatformCatalogForbiddenError: 403,
+        PlatformCatalogError: 400,
     }
 
 

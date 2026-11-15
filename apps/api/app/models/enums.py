@@ -176,6 +176,16 @@ class OperatorType(str, Enum):
     """订单状态流转的操作方类型。
 
     服务商侧区分管理员与普通员工，供 R3「非授权角色可触发金额变更」审计判定使用。
+
+    平台侧同理分三种：PLATFORM_ADMIN（平台管理员）、PLATFORM_OPS（平台运营，
+    管目录与改价）、PLATFORM_FINANCE（平台财务，确认结算）。
+    拿 PLATFORM_ADMIN 顶替 PLATFORM_OPS 会丢信息——「谁改的价」在审计上是
+    两拨人，R3 要靠 operator_type 区分。
+
+    **取值顺序与迁移建出来的库不一样**：0001 建的是
+    (..., PLATFORM_ADMIN, SYSTEM)，0006 追加 PLATFORM_FINANCE、
+    0008 追加 PLATFORM_OPS，都是追加到末尾；而这里按「谁用得多」排。
+    没有任何地方按 operator_type 排序（排序按 id / 时间），所以不影响逻辑。
     """
 
     USER = "USER"
@@ -183,6 +193,7 @@ class OperatorType(str, Enum):
     PROVIDER_ADMIN = "PROVIDER_ADMIN"
     PROVIDER_STAFF = "PROVIDER_STAFF"
     PLATFORM_ADMIN = "PLATFORM_ADMIN"
+    PLATFORM_OPS = "PLATFORM_OPS"
     PLATFORM_FINANCE = "PLATFORM_FINANCE"
     SYSTEM = "SYSTEM"
 

@@ -36,9 +36,15 @@ make e2e-clean    # 清掉 seed 种的数据
 - **只碰开发库**：库名带 `_test` 直接拒绝执行；`TEST_DATABASE_URL` 与 `DATABASE_URL` 指向同一个库也拒绝。
 - 客户账号**不种**：C 端是「登录即注册」，用手机号 `13800000001` 第一次登录就建号。
 - 跑完打印每行数据的 id 与四个登录账号（验证码取 `LOGIN_SMS_CODE`，没配就是 dev 占位码 123456）。
-- **平台管理员**（13800000004）是 PLAT-01 的服务商管理页用的：那一页只有
-  `PLATFORM_ADMIN` 角色能进（后端按 token 里的角色判），服务商账号进不去。
+- **平台管理员**（13800000004）是平台侧三个页面用的：服务商管理（PLAT-01）、
+  订单总览与品类管理（PLAT-02）。这三页只有 `PLATFORM_ADMIN` /
+  `PLATFORM_OPS` 角色能进（后端按 token 里的角色判），服务商账号进不去。
   平台侧角色**不带服务商归属**，所以这个账号没有 provider_id。
+
+  > 改了后端枚举（新增 `operator_type` 的取值）之后，**开发库要先跑迁移**：
+  > `cd apps/api && alembic upgrade head`。平台运营（`PLATFORM_OPS`）写审计日志时
+  > 会往 `operator_type` 列写 `PLATFORM_OPS`，库里没这个取值就直接报错。
+  > 测试库不走 alembic（用 `create_all` 建表），所以测试不会碰到这个问题。
 
 ## make e2e-serve
 
