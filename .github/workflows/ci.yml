@@ -74,7 +74,7 @@ jobs:
       REQUIRE_INTEGRATION: "1"
       # 集成测试数量下限。与 infra/compose/docker-compose.dev.yml 里的
       # 同名值保持一致；新增集成测试时两边一起改。
-      EXPECTED_INTEGRATION_TESTS: "277"
+      EXPECTED_INTEGRATION_TESTS: "300"
     defaults:
       run:
         working-directory: apps/api

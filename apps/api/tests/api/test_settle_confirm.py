@@ -24,6 +24,7 @@ import pytest
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api.v1 import settlements as confirm_router
 from app.core.auth import CurrentUser, create_access_token
 from app.core.database import get_session
 from app.main import app
@@ -138,6 +139,7 @@ PROVIDER_ID = 1
 FINANCE_USER_ID = 2  # 平台财务
 OPS_USER_ID = 3  # 平台运营（不是财务）
 CUSTOMER_USER_ID = 4
+ADMIN_USER_ID = 6  # 平台管理员（能看结算单列表，但不能确认）
 
 MASTER_ID = 1
 MASTER_USER_ID = 5
@@ -171,6 +173,10 @@ def _finance_header() -> dict[str, str]:
 
 def _ops_header() -> dict[str, str]:
     return _auth_header(OPS_USER_ID, UserRole.PLATFORM_OPS)
+
+
+def _admin_header() -> dict[str, str]:
+    return _auth_header(ADMIN_USER_ID, UserRole.PLATFORM_ADMIN)
 
 
 def _customer_header() -> dict[str, str]:
@@ -285,6 +291,7 @@ async def seeded(db):
                 User(id=OPS_USER_ID, phone="13900000003", role=UserRole.PLATFORM_OPS),
                 User(id=CUSTOMER_USER_ID, phone="13900000004", role=UserRole.USER),
                 User(id=MASTER_USER_ID, phone="13900000005", role=UserRole.MASTER),
+                User(id=ADMIN_USER_ID, phone="13900000006", role=UserRole.PLATFORM_ADMIN),
             ]
         )
         await session.flush()
@@ -615,7 +622,105 @@ async def test_non_finance_role_is_forbidden(db, seeded, spy_api_client) -> None
 
 
 # ---------------------------------------------------------------------
-# 3. 已确认再确认 -> 404（与「不存在」同构）
+# 3. 平台管理员 -> 403，挡在**路由层**（service 根本没被调用）
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_platform_admin_is_blocked_at_route_layer(
+    db, seeded, spy_api_client, monkeypatch
+) -> None:
+    """平台管理员 -> 403，而且是**路由层**挡的：service 压根没被调用。
+
+    管理员能看结算单列表（对账用），但确认结算是把钱定下来的动作，
+    只归财务——看得到不等于确认得了。
+
+    三道证据说明「死在路由层」：
+
+    1. **service 间谍**：把路由层引用的 service 换成记调用的壳，
+       断言一次都没被叫到（这一条最直接：service 没跑起来）。
+    2. **间谍 session**：一次事务都没开、一条 SQL 都没发——
+       没碰库，也就问不到「这张结算单存不存在」。
+    3. **响应文案**：路由层的 403 是通用的 ``"Forbidden"``；
+       service 层抛的 403 是 ``"当前角色不能确认结算单"``。
+    """
+    http_client, spies = spy_api_client
+
+    # service 间谍：记下每一次调用
+    calls: list[int] = []
+    real_service = confirm_router.confirm_settlement_service
+
+    async def spy_service(*args, **kwargs):
+        calls.append(kwargs.get("settlement_id"))
+        return await real_service(*args, **kwargs)
+
+    monkeypatch.setattr(confirm_router, "confirm_settlement_service", spy_service)
+
+    response = await http_client.post(
+        _confirm_url(SETTLEMENT_ID), headers=_admin_header()
+    )
+
+    # service 没被调用
+    assert calls == []
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Forbidden"}
+
+    # service 没被调用 -> 库一次都没碰
+    assert len(spies) == 1
+    assert spies[0].begins == 0
+    assert spies[0].statements == []
+
+    # 数据一点没动
+    settlement = await _settlement_of(db, SETTLEMENT_ID)
+    assert settlement.status == SettlementStatus.PENDING
+    assert settlement.confirmed_by is None
+    assert settlement.confirmed_at is None
+    assert await _audit_logs_of(db, target_id=SETTLEMENT_ID) == []
+
+
+# ---------------------------------------------------------------------
+# 3b. service 层的守卫还在（纵深防御）：直接调 service 也拒
+# ---------------------------------------------------------------------
+
+
+class _NeverTouchedSession:
+    """任何调用都炸的 session 替身。
+
+    service 的角色守卫应该在**碰库之前**就抛错：
+    真碰了库，这里会先炸出来（AssertionError），而不是让
+    SettlementForbiddenError 抛出来——顺序反了就说明守卫失效了。
+    """
+
+    def __getattr__(self, name):
+        raise AssertionError(
+            "角色不对时 service 碰了库（访问了 {}）".format(name)
+        )
+
+
+async def test_service_guard_rejects_non_finance_before_touching_db() -> None:
+    """service 层那道守卫还在：绕过路由层直接调，管理员照样被拒。
+
+    路由层已经有 ``require_platform_finance``，service 里那道是
+    **纵深防御**：service 可能被别处直接调用（定时任务、内部脚本），
+    不该依赖路由层替它把关。
+    """
+    current = CurrentUser(
+        user_id=ADMIN_USER_ID,
+        role=UserRole.PLATFORM_ADMIN,
+        provider_id=None,
+    )
+
+    with pytest.raises(SettlementForbiddenError):
+        await confirm_settlement(
+            _NeverTouchedSession(),  # type: ignore[arg-type]
+            current=current,
+            settlement_id=SETTLEMENT_ID,
+        )
+
+
+# ---------------------------------------------------------------------
+# 4. 已确认再确认 -> 404（与「不存在」同构）
 # ---------------------------------------------------------------------
 
 
@@ -640,7 +745,7 @@ async def test_confirm_already_confirmed_returns_404(db, seeded, api_client) -> 
 
 
 # ---------------------------------------------------------------------
-# 4. 不存在的结算单 -> 404（与「已确认」同构）
+# 5. 不存在的结算单 -> 404（与「已确认」同构）
 # ---------------------------------------------------------------------
 
 
@@ -683,7 +788,7 @@ async def test_missing_settlement_returns_404(db, seeded, api_client) -> None:
 
 
 # ---------------------------------------------------------------------
-# 5. 关联订单没全部流转 -> 整体回滚
+# 6. 关联订单没全部流转 -> 整体回滚
 # ---------------------------------------------------------------------
 
 
@@ -718,7 +823,7 @@ async def test_orders_not_all_settled_rolls_back(db, seeded, api_client) -> None
 
 
 # ---------------------------------------------------------------------
-# 6. 并发确认同一张 -> 成功 1 失败 1
+# 7. 并发确认同一张 -> 成功 1 失败 1
 # ---------------------------------------------------------------------
 
 

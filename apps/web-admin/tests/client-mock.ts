@@ -29,6 +29,10 @@ export const mockClient = {
   createProviderAdmin: vi.fn(),
   /** GET /api/v1/platform/orders */
   listPlatformOrders: vi.fn(),
+  /** GET /api/v1/platform/settlements */
+  listPlatformSettlements: vi.fn(),
+  /** POST /api/v1/settlements/{settlement_id}/confirm */
+  confirmSettlement: vi.fn(),
   /** GET /api/v1/platform/categories */
   listPlatformCategories: vi.fn(),
   /** POST /api/v1/platform/categories */

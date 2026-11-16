@@ -212,6 +212,10 @@ export interface paths {
          * @description 确认一张待结算的结算单，关联订单一并转为「已结算」。
          *
          *     角色不对返回 403；结算单不存在或已被确认返回 404（两种情况同构）。
+         *
+         *     **只有平台财务能确认**（``require_platform_finance``）：
+         *     路由层就在碰库之前把别的角色挡掉（管理员能看结算单列表，
+         *     但看得到不等于确认得了）。
          */
         post: operations["confirm_settlement_api_v1_settlements__settlement_id__confirm_post"];
         delete?: never;
@@ -685,6 +689,26 @@ export interface paths {
          *     服务项不存在 -> 404。
          */
         patch: operations["update_platform_item_api_v1_platform_items__item_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/platform/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 平台结算单列表（可按状态 / 服务商筛选）
+         * @description 列出平台侧可见的全部结算单（财务与管理员）。
+         */
+        get: operations["list_platform_settlements_api_v1_platform_settlements_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/auth/login": {
@@ -1782,6 +1806,103 @@ export interface components {
              * @description 最后修改时间（乐观锁的版本号，改的时候原样带回）
              */
             updated_at: string;
+        };
+        /**
+         * PlatformSettlementItem
+         * @description 平台财务看到的一张结算单。
+         */
+        PlatformSettlementItem: {
+            /**
+             * Id
+             * @description 结算单 ID
+             */
+            id: number;
+            /**
+             * Provider Name
+             * @description 服务商名称
+             */
+            provider_name: string;
+            /**
+             * Period Start
+             * Format: date
+             * @description 结算周期开始日（含）
+             */
+            period_start: string;
+            /**
+             * Period End
+             * Format: date
+             * @description 结算周期结束日（含）
+             */
+            period_end: string;
+            /**
+             * Total Amount
+             * @description 周期内订单金额合计（客户实付）
+             */
+            total_amount: string;
+            /**
+             * Commission Amount
+             * @description 平台佣金
+             */
+            commission_amount: string;
+            /**
+             * Net Amount
+             * @description 服务商实收（合计 - 佣金）
+             */
+            net_amount: string;
+            /** @description 结算单状态 */
+            status: components["schemas"]["SettlementStatus"];
+            /**
+             * Confirmed At
+             * @description 确认时间；还没确认时为空
+             */
+            confirmed_at?: string | null;
+        };
+        /**
+         * PlatformSettlementListResponse
+         * @description 结算单列表（一页 + 总数 + 筛选用的服务商列表）。
+         */
+        PlatformSettlementListResponse: {
+            /**
+             * Items
+             * @description 当前页的结算单
+             */
+            items: components["schemas"]["PlatformSettlementItem"][];
+            /**
+             * Total
+             * @description 符合筛选条件的结算单总数（不受分页影响）
+             */
+            total: number;
+            /**
+             * Page
+             * @description 当前页码（从 1 开始）
+             */
+            page: number;
+            /**
+             * Limit
+             * @description 本次生效的每页条数（上限 100）
+             */
+            limit: number;
+            /**
+             * Providers
+             * @description 筛选栏用的服务商列表（有过结算单的服务商）——放在这里是因为平台侧的服务商列表接口只对平台管理员开放，而结算单列表是财务要用的
+             */
+            providers: components["schemas"]["PlatformSettlementProviderOption"][];
+        };
+        /**
+         * PlatformSettlementProviderOption
+         * @description 筛选栏里的一个服务商选项。
+         */
+        PlatformSettlementProviderOption: {
+            /**
+             * Id
+             * @description 服务商 ID
+             */
+            id: number;
+            /**
+             * Name
+             * @description 服务商名称
+             */
+            name: string;
         };
         /**
          * ProviderAdminItem
@@ -3477,6 +3598,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformServiceItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_platform_settlements_api_v1_platform_settlements_get: {
+        parameters: {
+            query?: {
+                /** @description 按结算单状态过滤，不传=全部 */
+                status?: components["schemas"]["SettlementStatus"] | null;
+                /** @description 按服务商过滤，不传=全部 */
+                provider_id?: number | null;
+                /** @description 页码，从 1 开始 */
+                page?: number;
+                /** @description 每页条数，默认 20，上限 100（超过按 100 算） */
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformSettlementListResponse"];
                 };
             };
             /** @description Validation Error */

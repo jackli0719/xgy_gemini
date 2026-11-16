@@ -16,7 +16,7 @@ import { computed, ref } from "vue";
 // 导入时改名：store 里同名的 computed（isProviderRole）会遮住工具函数，
 // 直接 import 同名会让 computed 里拿到的是 ref 而不是函数。
 import {
-  isPlatformRole as roleIsPlatform,
+  isPlatformOpsRole as roleIsPlatformOps,
   isProviderRole as roleIsProvider,
 } from "@/utils/role";
 
@@ -61,12 +61,24 @@ export const useSessionStore = defineStore("session", () => {
    */
   const isPlatformAdmin = computed(() => currentUser.value?.role === "PLATFORM_ADMIN");
   /**
-   * 是否平台侧角色（平台管理员 / 平台运营）。
+   * 是否平台侧「运营」角色（平台管理员 / 平台运营）。
    *
-   * 这两种角色能进平台侧页面（订单总览 / 品类管理）；
+   * 这两种角色能进运营页面（订单总览 / 品类管理）；
    * 服务商侧页面（派单 / 师傅管理）对它们一律 403。
+   *
+   * **不含财务**：运营页面的后端接口只放 PLATFORM_ADMIN / PLATFORM_OPS，
+   * 财务进运营页面只会拿到 403，所以运营菜单不归它。
    */
-  const isPlatformStaff = computed(() => roleIsPlatform(currentUser.value?.role));
+  const isPlatformStaff = computed(() => roleIsPlatformOps(currentUser.value?.role));
+  /**
+   * 是否平台财务。
+   *
+   * 菜单按它过滤：财务只看得到「结算确认」。
+   *
+   * **它也是唯一能点「确认结算」的角色**（列表管理员也能看，
+   * 但确认是钱相关的写动作，后端只放财务）。
+   */
+  const isPlatformFinance = computed(() => currentUser.value?.role === "PLATFORM_FINANCE");
   /**
    * 是否服务商侧角色（服务商管理员 / 员工）。
    *
@@ -98,6 +110,7 @@ export const useSessionStore = defineStore("session", () => {
     isProvider,
     isPlatformAdmin,
     isPlatformStaff,
+    isPlatformFinance,
     isProviderRole,
     setToken,
     setCurrentUser,

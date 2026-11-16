@@ -44,6 +44,14 @@ const PLATFORM_OPS: CurrentUser = {
   provider_id: null,
 };
 
+const PLATFORM_FINANCE: CurrentUser = {
+  id: 4,
+  nickname: "平台财务",
+  phone: "13700000004",
+  role: "PLATFORM_FINANCE",
+  provider_id: null,
+};
+
 const PROVIDER_ADMIN: CurrentUser = {
   id: 3,
   nickname: "甲管理员",
@@ -143,6 +151,33 @@ describe("按角色显示的界面", () => {
     expect(nav.find('[data-test="platform-providers-link"]').exists()).toBe(false);
     expect(nav.find('[data-test="platform-orders-link"]').exists()).toBe(true);
     expect(nav.find('[data-test="platform-categories-link"]').exists()).toBe(true);
+  });
+
+  it("平台财务看得到「结算确认」，看不到运营页面", async () => {
+    const { pinia, router } = await setupApp("/platform/settlements", {
+      currentUser: PLATFORM_FINANCE,
+    });
+    const wrapper = mount(App, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    const nav = wrapper.find('[data-test="app-nav"]');
+    expect(nav.find('[data-test="platform-settlements-link"]').exists()).toBe(true);
+    // 订单总览 / 品类管理后端只放 PLATFORM_ADMIN / PLATFORM_OPS，
+    // 财务点进去只会拿到 403，菜单就不显示了
+    expect(nav.find('[data-test="platform-orders-link"]').exists()).toBe(false);
+    expect(nav.find('[data-test="platform-categories-link"]').exists()).toBe(false);
+    expect(nav.find('[data-test="platform-providers-link"]').exists()).toBe(false);
+  });
+
+  it("平台管理员也看得到「结算确认」", async () => {
+    const { pinia, router } = await setupApp("/platform/orders", {
+      currentUser: PLATFORM_ADMIN,
+    });
+    const wrapper = mount(App, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    const nav = wrapper.find('[data-test="app-nav"]');
+    expect(nav.find('[data-test="platform-settlements-link"]').exists()).toBe(true);
   });
 
   it("服务商账号看不到平台菜单", async () => {

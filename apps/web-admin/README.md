@@ -2,11 +2,13 @@
 
 Web 管理后台（Vue3 + Element Plus），平台端与服务商端共用，按 provider_id 隔离数据与菜单。
 
-当前进度（PLAT-02）：
+当前进度（PLAT-03）：
 
 - **平台侧服务商管理页**（服务商列表 / 新建 / 审核 / 冻结 / 建管理员账号，PLAT-01）
 - **平台侧订单总览页**（全量订单，可按状态 / 服务商筛选，PLAT-02）
 - **平台侧品类管理页**（品类树 + 服务项列表，新建 / 编辑 / 改价，PLAT-02）
+- **平台侧结算确认页**（结算单列表 + 状态 / 服务商筛选 + 确认结算，PLAT-03；
+  「确认结算」按钮只给平台财务，管理员只能看）
 
 平台侧页面分两种权限：
 
@@ -15,6 +17,7 @@ Web 管理后台（Vue3 + Element Plus），平台端与服务商端共用，按
 | `/platform/providers` 服务商管理 | `PLATFORM_ADMIN` |
 | `/platform/orders` 订单总览 | `PLATFORM_ADMIN` / `PLATFORM_OPS` |
 | `/platform/categories` 品类管理 | `PLATFORM_ADMIN` / `PLATFORM_OPS` |
+| `/platform/settlements` 结算确认 | `PLATFORM_FINANCE` / `PLATFORM_ADMIN` |
 
 菜单与标题都按角色走：平台账号看的是「平台管理后台」，服务商账号看的是
 「服务商后台」，两边看到的菜单也不一样（PLAT-02 修的 PLAT-01 遗留）。
@@ -43,6 +46,7 @@ make web-typecheck                # 类型检查（vue-tsc）
 | `src/views/PlatformProvidersView.vue` | 平台侧服务商管理页：列表 + 新建 / 审核 / 冻结 / 建管理员 |
 | `src/views/PlatformOrdersView.vue` | 平台侧订单总览页：全量订单 + 状态 / 服务商筛选 + 分页 |
 | `src/views/PlatformCategoriesView.vue` | 平台侧品类管理页：品类树 + 服务项列表 + 新建 / 编辑 / 改价 |
+| `src/views/PlatformSettlementsView.vue` | 平台侧结算确认页：结算单列表 + 状态 / 服务商筛选 + 确认结算 |
 
 ## 三条边界
 
@@ -51,7 +55,12 @@ make web-typecheck                # 类型检查（vue-tsc）
    也没用——接口压根没这个入参。
 2. **平台侧接口按角色分层**：服务商管理只认 `PLATFORM_ADMIN`
    （`require_platform_admin`），订单总览与品类管理认 `PLATFORM_ADMIN` /
-   `PLATFORM_OPS`（`require_platform_staff`）。路由守卫按 role 拦
+   `PLATFORM_OPS`（`require_platform_staff`），结算单列表认
+   `PLATFORM_FINANCE` / `PLATFORM_ADMIN`
+   （`require_platform_settlement_viewer`）——**看**列表管理员也行，
+   但**确认结算**只认 `PLATFORM_FINANCE`（后端
+   `app.services.settle` 的角色守卫），所以管理员进这页看不到
+   「确认结算」按钮。路由守卫按 role 拦
    （菜单也按角色显示），但那只是体验层——真正的边界在后端，角色不对一律 403。
    「管哪一个」是路径参数（`provider_id` / `category_id` / `item_id`），
    **操作人身份永远只从 token 来**。
