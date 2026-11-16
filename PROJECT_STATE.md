@@ -11,6 +11,7 @@
 - **前端三端**：`apps/h5-user`（用户）、`apps/h5-master`（师傅）、`apps/web-admin`（平台端与服务商端**共用**一套后台，靠 `provider_id` 租户隔离，`provider_id` 由服务端从登录态推导）。
 - **`packages/shared`**：openapi 生成的 TS SDK + 前后端共用的时区契约 JSON；`packages/ui`、`packages/config` 目前只是空骨架。
 - **存储**：PostgreSQL 16（timestamptz）+ Redis 7（`infra/compose`）。业务日期口径与存库 UTC 口径分离，见「技术债」。
+- **异常树**：每条业务链路一棵（PlaceOrder / Dispatch / MasterAction / MasterQuery / ServiceFlow / Settlement / Catalog / PlatformProvider / PlatformCatalog / MasterOnboarding），HTTP 状态码映射集中在 `app/api/v1/errors.py`。
 - **测试**：后端单元 + 集成（集成用独立 `TEST_DATABASE_URL`，每次 drop_all + create_all，不走 alembic）；
   前端三端 vitest；`apps/api/tests/e2e` 是 API 级四端闭环；`e2e/` 是人工点一遍的三件套（seed / serve / clean）。
 
@@ -19,15 +20,17 @@
 - 工程底座：monorepo 骨架、compose 编排、Makefile、CI 门禁 + 分支保护操作手册、`.env.example`。
 - 数据与领域：全量模型 + 8 个 alembic 迁移、订单状态机、定价、时段规则、订单号生成。
 - 后端 API：登录鉴权、地址、服务目录、下单、支付（mock 回调）、派单、师傅接单/开工/完工、
-  服务商侧师傅管理、平台侧服务商管理与品类管理与订单总览、结算单生成（T+1）与财务确认。
+  服务商侧师傅管理、平台侧服务商管理与品类管理与订单总览、结算单生成（T+1）与财务确认、
+  **师傅自助入驻（登记 → 平台审核）**。
 - 前端三端：用户登录/地址/服务/下单；师傅待接单/开工完工；后台派单、师傅管理、服务商管理、订单总览、品类管理、结算确认。
-- 质量：后端 890 个用例（集成 305 个真跑、0 skip）、前端三端 94 个用例、API 级四端闭环 E2E、变异测试。
+- 质量：后端 935 个用例（集成 348 个真跑、0 skip）、前端三端 94 个用例、API 级四端闭环 E2E、变异测试。
 - 时区：全仓统一 Asia/Shanghai，业务日期（今天/时段/阈值/结算周期）按业务时区算，存库仍是 UTC timestamptz。
 
 ## 未完成
 
 - **真实支付**：目前只有 mock 回调，没有接任何支付渠道。
 - **打款出款**：结算单生成与财务确认有了，钱怎么打给服务商没做。
+- **入驻的前端**：T-13 只做后端。师傅端没有「申请入驻」页，web-admin 没有「审核入驻」页。
 - **浏览器级 E2E**：Playwright 方案（任务 #24–#27）未开工，只有 API 级闭环与人工工具。
 - **packages/ui / packages/config**：空骨架，尚无共享组件与工程配置。
 - **生产部署**：镜像构建与上线流程、secret 轮换、备份恢复、监控告警。
@@ -43,6 +46,11 @@
 - 业务时区当前是固定 +08:00（Asia/Shanghai 无夏令时），将来若支持带夏令时的地区，阈值/结算口径要重算。
 - `web-admin` 一个前端同时承载平台端与服务商端两套角色，页面变多后需要拆分。
 - 全局 `~/.claude/settings.json` 里 3 条 http hook 端口过期（与本仓库 CI 无关）。
+- **师傅入驻的三处取舍**（T-13）：
+  1. 驳回用**删行**表达（没有 `REJECTED` 状态）——枚举值删不掉，加一个要同时改 `create_all` 与 alembic 两条建库路径；「没通过审核 = 没入职」语义也更干净。
+  2. 师傅被服务商停用（`DISABLED`）后**不能自助重新申请**——自助重提会绕过服务商的停用决定；离职后重新入职要走平台介入。
+  3. 入驻申请**没有身份证 / 资质字段**（表结构没动，也就没有迁移）；合规资质要上，需要另开一卡加列 + 迁移。
+- 师傅身份与登录账号的一致性：**角色在登记时就改成 `MASTER`**，审核状态由 `master.status` 单独表达；`user.provider_id` 对师傅恒空（数据库 CHECK 约束强制），归属只由 `master.provider_id` 说了算。
 
 ## 协作规则
 
@@ -58,17 +66,17 @@
 
 ## 当前 commit
 
-- 本分支：`feature/TZ-01-timezone` —— PR **#7 OPEN**，CI 全绿，**未合并**。
-- 分支提交序列：`09b12d9` TZ-01 实现 → `docs: project state handoff` → `fix(TZ-01): address review findings`（审查修正）。最新哈希见 `git log -1`。
-- `main` HEAD：`0087dc6 feat(PLAT-03): platform settlement confirmation (#6)`
-- 本文件自身的提交见 `git log -1`（也在这个分支上，随 PR #7 一起合并）。
+- 本分支：`feature/T-13-master-onboarding` —— 本地提交，**未 push、未开 PR**。
+- 分支提交序列：T-13 实现（service + API + 测试 + 契约导出）。最新哈希见 `git log -1`。
+- `main` HEAD：`86d9e0c fix(TZ-01): unify timezone to Asia/Shanghai (#7)`
+- 本文件自身的提交见 `git log -1`（也在这个分支上，随 PR 一起合并）。
 
 ## CI 现状
 
 - **触发**：PR 到 `main`、push 到 `main` 各跑一遍；同 ref 新提交取消旧跑批。
-- **后端 job**：pytest 单元 + 集成分两轮跑；集成测试**不许静默 skip**；再单独数一遍收集到的集成用例数，低于 `EXPECTED_INTEGRATION_TESTS`（现 305）直接红。
+- **后端 job**：pytest 单元 + 集成分两轮跑；集成测试**不许静默 skip**；再单独数一遍收集到的集成用例数，低于 `EXPECTED_INTEGRATION_TESTS`（现 348）直接红。
 - **前端 job**：三个 workspace 各自 typecheck / test / build，矩阵展开成 3 个检查。
-- **最近结果**：PR #7 绿（2m40s）；`main` push #6 绿。历史故意造红的验证 PR（#2）确实红过，门禁有效。
+- **最近结果**：PR #7 绿（已合并进 `main`）；`main` push #7 绿。历史故意造红的验证 PR（#2）确实红过，门禁有效。
 - **Secrets**：`DATABASE_URL` / `TEST_DATABASE_URL` / `REDIS_URL` / `JWT_SECRET` / `POSTGRES_PASSWORD` 已配；`LOGIN_SMS_CODE` 未配（CI 里 `APP_ENV=dev`，走占位码）。
-- **⚠️ `main` 目前实际没有分支保护**（GitHub API 报 `Branch not protected`）——操作手册在 `.github/BRANCH_PROTECTION.md`，需人工在 Settings 里勾选 4 个 required status checks + 1 approval + 禁 bypass。
+- **分支保护**：已按 `.github/BRANCH_PROTECTION.md` 在 Settings 里配好（4 个 required status checks + 1 approval + 禁 bypass）。
 - **审查不在 CI 里**：走本地 Claude Code 审查，CI 只有一个可配的 review gate。

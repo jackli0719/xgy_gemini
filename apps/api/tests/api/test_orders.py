@@ -55,7 +55,13 @@ from app.services.errors import (
     MasterActionInvariantError,
     MasterNotDispatchableError,
     MasterNotFoundError,
+    MasterOnboardingConflictError,
+    MasterOnboardingError,
+    MasterOnboardingForbiddenError,
+    MasterOnboardingInvariantError,
+    MasterOnboardingNotFoundError,
     MasterOrderStatusNotAllowedError,
+    MasterPendingNotSettableError,
     MasterQueryError,
     MasterQueryForbiddenError,
     MasterStatusNotSettableError,
@@ -194,6 +200,8 @@ def test_exception_status_map_contents() -> None:
         MasterNotFoundError: 404,
         # 师傅状态管理：状态不允许被设置 -> 改请求内容才可能解决
         MasterStatusNotSettableError: 400,
+        # 师傅状态管理：待审核的师傅只能由平台审核流转 -> 等平台审完再来
+        MasterPendingNotSettableError: 409,
         # 本商师傅当前不可接单（停用 / 休假 / 未审核）-> 换个师傅是可行的应对
         MasterNotDispatchableError: 409,
         # 师傅接单/拒单
@@ -232,6 +240,12 @@ def test_exception_status_map_contents() -> None:
         PlatformCatalogConflictError: 409,
         PlatformCatalogForbiddenError: 403,
         PlatformCatalogError: 400,
+        # 师傅入驻（T-13：登记 / 平台审核）
+        MasterOnboardingForbiddenError: 403,
+        MasterOnboardingNotFoundError: 404,
+        MasterOnboardingConflictError: 409,
+        MasterOnboardingInvariantError: 500,
+        MasterOnboardingError: 400,
     }
 
 

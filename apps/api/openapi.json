@@ -1580,6 +1580,164 @@
         }
       }
     },
+    "/api/v1/masters/joinable-providers": {
+      "get": {
+        "tags": [
+          "master-onboarding"
+        ],
+        "summary": "可申请加入的服务商列表",
+        "description": "列出可以申请加入的服务商（只有正常营业的）。\n\n只暴露 id 与名称：佣金率与联系电话是平台侧 / 服务商侧的信息。",
+        "operationId": "list_joinable_providers_api_v1_masters_joinable_providers_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinableProviderListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/masters/onboarding": {
+      "post": {
+        "tags": [
+          "master-onboarding"
+        ],
+        "summary": "提交入驻申请（登记为待审核）",
+        "description": "提交入驻申请。\n\n登记成功状态是「待审核」（PENDING）——能不能入职由平台说了算。\n已经申请过 / 已入职 -> 409；目标服务商不可加入 -> 404。",
+        "operationId": "submit_onboarding_api_v1_masters_onboarding_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitOnboardingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingApplicationItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "master-onboarding"
+        ],
+        "summary": "我的入驻申请",
+        "description": "返回当前账号的入驻申请。\n\n没有申请 -> 404（前端据此显示「去申请」）。",
+        "operationId": "get_my_onboarding_api_v1_masters_onboarding_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingApplicationItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/platform/providers": {
       "get": {
         "tags": [
@@ -1859,6 +2017,172 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProviderAdminItem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/masters": {
+      "get": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "入驻申请列表（平台侧，分页）",
+        "description": "列出师傅入驻申请（平台侧）。\n\n不传 status 就是全部（含已入职的师傅）；审核页一般只看 PENDING。",
+        "operationId": "list_onboarding_applications_api_v1_platform_masters_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/MasterStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "按状态过滤，不传=全部（前端一般传 PENDING）",
+              "title": "Status"
+            },
+            "description": "按状态过滤，不传=全部（前端一般传 PENDING）"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "每页条数，默认 20，上限 100（超过按 100 算）",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "每页条数，默认 20，上限 100（超过按 100 算）"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingApplicationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/platform/masters/{master_id}/review": {
+      "post": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "审核师傅入驻申请（通过 / 驳回）",
+        "description": "审核一份入驻申请。\n\n通过 -> 师傅状态转「已入驻」（ACTIVE），可选改判到另一家服务商；\n驳回 -> 这一行删掉（没通过审核 = 没入职），账号角色回退成普通用户。\n\n申请不存在 / 已经不是「待审核」-> 404（两种情况同构）。",
+        "operationId": "review_onboarding_api_v1_platform_masters__master_id__review_post",
+        "parameters": [
+          {
+            "name": "master_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "师傅 ID",
+              "title": "Master Id"
+            },
+            "description": "师傅 ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewOnboardingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewOnboardingResponse"
                 }
               }
             }
@@ -2913,6 +3237,47 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "JoinableProviderItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "服务商 ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "服务商名称"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "JoinableProviderItem",
+        "description": "可以申请加入的服务商。\n\n只有 id 与名称：佣金率、联系电话是平台侧 / 服务商侧的信息，\n入驻阶段用不上。"
+      },
+      "JoinableProviderListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JoinableProviderItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "可加入的服务商"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "JoinableProviderListResponse",
+        "description": "可加入的服务商列表。"
+      },
       "LoginRequest": {
         "properties": {
           "phone": {
@@ -3320,6 +3685,104 @@
         ],
         "title": "MockPayResult",
         "description": "mock 支付回调的响应体。\n\n只回三个字段：订单号、订单状态、支付状态。不回金额、不回用户信息。"
+      },
+      "OnboardingApplicationItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "师傅 ID（审核接口用它）"
+          },
+          "real_name": {
+            "type": "string",
+            "title": "Real Name",
+            "description": "师傅姓名"
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "description": "申请人手机号"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MasterStatus",
+            "description": "入驻状态"
+          },
+          "provider_id": {
+            "type": "integer",
+            "title": "Provider Id",
+            "description": "所属服务商 ID"
+          },
+          "provider_name": {
+            "type": "string",
+            "title": "Provider Name",
+            "description": "所属服务商名称"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "提交申请的时间"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "real_name",
+          "phone",
+          "status",
+          "provider_id",
+          "provider_name",
+          "created_at"
+        ],
+        "title": "OnboardingApplicationItem",
+        "description": "一条入驻申请。\n\n平台侧看得到申请人的手机号（要联系本人核实资质）；\n师傅自己看自己那一条时也会拿到它（同一个模型，手机号就是自己的）。"
+      },
+      "OnboardingApplicationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingApplicationItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "当前页的申请"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "符合条件的申请总数（不受分页影响）"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "当前页码（从 1 开始）"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "本次生效的每页条数（上限 100）"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "OnboardingApplicationListResponse",
+        "description": "入驻申请列表（一页 + 总数）。"
+      },
+      "OnboardingDecision": {
+        "type": "string",
+        "enum": [
+          "APPROVE",
+          "REJECT"
+        ],
+        "title": "OnboardingDecision",
+        "description": "平台审核师傅入驻申请的两种结论。\n\n这是**业务规则**，不是「接口长什么样」：审核只有「通过」与「驳回」两种，\n与服务商侧那套 ``SettableMasterStatus``（师傅状态能被设成什么）\n是同一类东西——都要 service 层按同一份定义再挡一次，\n不能只靠请求体校验。\n\n放在这里（而不是 schema 层）是因为它是**业务规则**：\n接口层用它把非法值变成 422，service 用它把不合法的结论挡在碰库之前。\n\n**不是数据库枚举**：它是请求里的一个字段，不落库；\n落库的是 ``MasterStatus``（师傅状态）。"
       },
       "OrderDetail": {
         "properties": {
@@ -4399,6 +4862,99 @@
         "title": "RejectResult",
         "description": "拒单成功后的结果。\n\nmaster_id 为空：拒单后订单退回「待派单」，当前没有承接师傅。"
       },
+      "ReviewOnboardingRequest": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/OnboardingDecision",
+            "description": "审核结论：APPROVE（通过）/ REJECT（驳回）"
+          },
+          "target_provider_id": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Provider Id",
+            "description": "改判到另一家服务商（可选）。不传则沿用申请里选的那家；传了必须是可加入状态的服务商"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "审核备注（可选，写进审计日志）"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "title": "ReviewOnboardingRequest",
+        "description": "平台审核入驻申请的请求体。\n\n``decision`` 只有两种取值（APPROVE / REJECT）——它是业务规则，\n定义在 ``app.models.enums.OnboardingDecision``（事实来源）。"
+      },
+      "ReviewOnboardingResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "师傅 ID"
+          },
+          "real_name": {
+            "type": "string",
+            "title": "Real Name",
+            "description": "师傅姓名"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MasterStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "审核后的状态；为空表示已驳回（该行已删除）"
+          },
+          "provider_id": {
+            "type": "integer",
+            "title": "Provider Id",
+            "description": "所属服务商 ID"
+          },
+          "provider_name": {
+            "type": "string",
+            "title": "Provider Name",
+            "description": "所属服务商名称"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "提交申请的时间"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "real_name",
+          "provider_id",
+          "provider_name",
+          "created_at"
+        ],
+        "title": "ReviewOnboardingResponse",
+        "description": "审核结果。\n\n``status`` 为空表示「驳回」：驳回是把这一行删掉（没通过审核 = 没入职），\n所以没有状态可回。审核结论留痕在审计日志里。"
+      },
       "ServiceFlowResult": {
         "properties": {
           "order_no": {
@@ -4561,6 +5117,31 @@
         ],
         "title": "SlotAvailability",
         "description": "某个时段的可预约情况。\n\n``available`` = capacity - used，只返回 available > 0 的时段。\n容量与已占用数一起返回，是为了让前端能显示「还剩几个」，\n而不是让前端自己算一遍（两边的口径容易不一致）。"
+      },
+      "SubmitOnboardingRequest": {
+        "properties": {
+          "real_name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Real Name",
+            "description": "师傅姓名"
+          },
+          "target_provider_id": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Target Provider Id",
+            "description": "申请加入的服务商 ID（必须是可加入状态）"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "real_name",
+          "target_provider_id"
+        ],
+        "title": "SubmitOnboardingRequest",
+        "description": "提交入驻申请的请求体。\n\n只有两个字段：师傅姓名与想加入的服务商。\n状态**不在**——登记一律「待审核」（PENDING），要审核通过才入职。"
       },
       "UpdateCategoryRequest": {
         "properties": {

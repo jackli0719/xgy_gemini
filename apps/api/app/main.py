@@ -14,6 +14,7 @@ from app.api.v1.errors import (
     catalog_error_handler,
     dispatch_error_handler,
     master_action_error_handler,
+    master_onboarding_error_handler,
     master_query_error_handler,
     place_order_error_handler,
     platform_catalog_error_handler,
@@ -23,6 +24,7 @@ from app.api.v1.errors import (
 )
 from app.api.v1.master import router as master_router
 from app.api.v1.master_action import router as master_action_router
+from app.api.v1.master_onboarding import router as master_onboarding_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.pay import router as pay_router
 from app.api.v1.platform import router as platform_router
@@ -36,6 +38,7 @@ from app.services.errors import (
     CatalogError,
     DispatchError,
     MasterActionError,
+    MasterOnboardingError,
     MasterQueryError,
     PlaceOrderError,
     PlatformCatalogError,
@@ -62,6 +65,8 @@ app.include_router(addresses_router)
 app.include_router(provider_router)
 # 师傅端只读查询（我的订单列表 / 订单详情 / 我的资料）
 app.include_router(master_router)
+# 师傅入驻（登记申请 / 我的申请状态 / 可加入的服务商）
+app.include_router(master_onboarding_router)
 # 平台侧服务商管理（服务商列表 / 建档 / 改状态 / 建管理员账号）
 app.include_router(platform_router)
 # 平台侧订单总览（全量订单，可按状态 / 服务商筛选）
@@ -94,3 +99,5 @@ app.add_exception_handler(CatalogError, catalog_error_handler)
 app.add_exception_handler(PlatformProviderError, platform_provider_error_handler)
 # 平台侧目录管理（品类 / 服务项 / 改价）是第九棵异常树（PlatformCatalogError）
 app.add_exception_handler(PlatformCatalogError, platform_catalog_error_handler)
+# 师傅入驻（登记 / 审核）是第十棵异常树（MasterOnboardingError）
+app.add_exception_handler(MasterOnboardingError, master_onboarding_error_handler)

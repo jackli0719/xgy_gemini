@@ -23,7 +23,13 @@ __all__ = [
     "MasterActionInvariantError",
     "MasterNotDispatchableError",
     "MasterNotFoundError",
+    "MasterOnboardingConflictError",
+    "MasterOnboardingError",
+    "MasterOnboardingForbiddenError",
+    "MasterOnboardingInvariantError",
+    "MasterOnboardingNotFoundError",
     "MasterOrderStatusNotAllowedError",
+    "MasterPendingNotSettableError",
     "MasterQueryError",
     "MasterQueryForbiddenError",
     "MasterStatusNotSettableError",
@@ -150,6 +156,20 @@ class MasterStatusNotSettableError(DispatchError):
     PENDING（待审核）是入驻流程的初始状态，服务商改不回去。
     接口层用窄枚举挡过一次（PENDING -> 422），service 这边再挡一次：
     类型提示挡不住运行时传错值。
+    """
+
+
+class MasterPendingNotSettableError(DispatchError):
+    """待审核（PENDING）的师傅，服务商侧不能改他的状态。
+
+    PENDING 是入驻流程的初始状态，只能由**平台审核**流转
+    （见 app.services.master_onboarding.review_onboarding）。
+    服务商提前把他置成 ACTIVE，等于绕过平台审核那道闸门；
+    置成 DISABLED / ON_LEAVE 也不对——这位师傅还没入职，
+    服务商根本不该动他的入职状态。
+
+    -> 409：等服务商 / 平台把状态改掉再来（或换个人操作），
+    不是 404（这个师傅确实存在且在本商作用域内）。
     """
 
 
@@ -382,5 +402,56 @@ class PlatformCatalogForbiddenError(PlatformCatalogError):
 
     典型场景：角色不是 PLATFORM_ADMIN / PLATFORM_OPS。正常情况下依赖层
     （``require_platform_staff``）已经挡住了，这里是 service 层的兜底。
+    """
+
+
+class MasterOnboardingError(Exception):
+    """师傅入驻失败的业务异常基类。
+
+    与前面九棵异常树平级：入驻是独立的一条链路（师傅登记 + 平台审核），
+    共用一个基类会让别的链路的兜底文案套到入驻错误上。
+    """
+
+
+class MasterOnboardingForbiddenError(MasterOnboardingError):
+    """当前账号不能做这件事。
+
+    典型场景：角色不是普通用户（服务商账号、平台账号都不该来申请入驻）；
+    或者这个账号已经在师傅体系里了（角色已是 MASTER）。
+
+    失败发生在**碰库之前**：角色不对的账号连「能不能申请」都问不到。
+    """
+
+
+class MasterOnboardingNotFoundError(MasterOnboardingError):
+    """入驻申请不存在，或目标服务商不存在 / 不可加入。
+
+    这两类都用同一个异常、同一句话，**不区分失败原因**：
+    入驻申请是**按 user_id 查自己**的（不存在就是不存在），
+    服务商那一侧则要同时挡住「不存在」与「不是 ACTIVE（已冻结 / 待审核）」
+    两种情况——调用方不该靠报错差异去枚举哪些服务商存在、哪些被冻结。
+    """
+
+
+class MasterOnboardingConflictError(MasterOnboardingError):
+    """状态冲突：不能重复申请，或审核条件已变。
+
+    - 已经有入驻申请（审核中 / 已入职 / 在服务商处被停用）；
+    - 条件 UPDATE 没命中（并发：另一个请求先一步提交了申请，
+      或者两个平台管理员同时审了同一份申请）。
+
+    都是「换个时候再来 / 刷新后重试」能解决的 -> 409。
+    """
+
+
+class MasterOnboardingInvariantError(MasterOnboardingError):
+    """内部一致性被打破（服务端 bug，不是客户端的问题）。
+
+    唯一的触发场景：「本事务内本会话改过这一行，回读出来仍不是我们写的样子」，
+    或者「库里出现了 master 表与 user 表对不上的数据」
+    （师傅身份与登录账号必须一一对应，且师傅的归属只由 master 表说了算）。
+
+    这类错误必须暴露成 500：它意味着服务端数据坏了，
+    伪装成「没申请过」只会让调用方一直重试。
     """
 

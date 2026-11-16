@@ -499,6 +499,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/masters/joinable-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 可申请加入的服务商列表
+         * @description 列出可以申请加入的服务商（只有正常营业的）。
+         *
+         *     只暴露 id 与名称：佣金率与联系电话是平台侧 / 服务商侧的信息。
+         */
+        get: operations["list_joinable_providers_api_v1_masters_joinable_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/masters/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我的入驻申请
+         * @description 返回当前账号的入驻申请。
+         *
+         *     没有申请 -> 404（前端据此显示「去申请」）。
+         */
+        get: operations["get_my_onboarding_api_v1_masters_onboarding_get"];
+        put?: never;
+        /**
+         * 提交入驻申请（登记为待审核）
+         * @description 提交入驻申请。
+         *
+         *     登记成功状态是「待审核」（PENDING）——能不能入职由平台说了算。
+         *     已经申请过 / 已入职 -> 409；目标服务商不可加入 -> 404。
+         */
+        post: operations["submit_onboarding_api_v1_masters_onboarding_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/providers": {
         parameters: {
             query?: never;
@@ -564,6 +615,53 @@ export interface paths {
          *     手机号已被占用 -> 409「手机号已注册」。
          */
         post: operations["create_platform_provider_admin_api_v1_platform_providers__provider_id__admin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/masters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 入驻申请列表（平台侧，分页）
+         * @description 列出师傅入驻申请（平台侧）。
+         *
+         *     不传 status 就是全部（含已入职的师傅）；审核页一般只看 PENDING。
+         */
+        get: operations["list_onboarding_applications_api_v1_platform_masters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/masters/{master_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 审核师傅入驻申请（通过 / 驳回）
+         * @description 审核一份入驻申请。
+         *
+         *     通过 -> 师傅状态转「已入驻」（ACTIVE），可选改判到另一家服务商；
+         *     驳回 -> 这一行删掉（没通过审核 = 没入职），账号角色回退成普通用户。
+         *
+         *     申请不存在 / 已经不是「待审核」-> 404（两种情况同构）。
+         */
+        post: operations["review_onboarding_api_v1_platform_masters__master_id__review_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1034,6 +1132,36 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * JoinableProviderItem
+         * @description 可以申请加入的服务商。
+         *
+         *     只有 id 与名称：佣金率、联系电话是平台侧 / 服务商侧的信息，
+         *     入驻阶段用不上。
+         */
+        JoinableProviderItem: {
+            /**
+             * Id
+             * @description 服务商 ID
+             */
+            id: number;
+            /**
+             * Name
+             * @description 服务商名称
+             */
+            name: string;
+        };
+        /**
+         * JoinableProviderListResponse
+         * @description 可加入的服务商列表。
+         */
+        JoinableProviderListResponse: {
+            /**
+             * Items
+             * @description 可加入的服务商
+             */
+            items: components["schemas"]["JoinableProviderItem"][];
+        };
+        /**
          * LoginRequest
          * @description 手机号 + 验证码登录。
          */
@@ -1346,6 +1474,91 @@ export interface components {
             status: components["schemas"]["OrderStatus"];
             pay_status: components["schemas"]["PayStatus"];
         };
+        /**
+         * OnboardingApplicationItem
+         * @description 一条入驻申请。
+         *
+         *     平台侧看得到申请人的手机号（要联系本人核实资质）；
+         *     师傅自己看自己那一条时也会拿到它（同一个模型，手机号就是自己的）。
+         */
+        OnboardingApplicationItem: {
+            /**
+             * Id
+             * @description 师傅 ID（审核接口用它）
+             */
+            id: number;
+            /**
+             * Real Name
+             * @description 师傅姓名
+             */
+            real_name: string;
+            /**
+             * Phone
+             * @description 申请人手机号
+             */
+            phone: string;
+            /** @description 入驻状态 */
+            status: components["schemas"]["MasterStatus"];
+            /**
+             * Provider Id
+             * @description 所属服务商 ID
+             */
+            provider_id: number;
+            /**
+             * Provider Name
+             * @description 所属服务商名称
+             */
+            provider_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 提交申请的时间
+             */
+            created_at: string;
+        };
+        /**
+         * OnboardingApplicationListResponse
+         * @description 入驻申请列表（一页 + 总数）。
+         */
+        OnboardingApplicationListResponse: {
+            /**
+             * Items
+             * @description 当前页的申请
+             */
+            items: components["schemas"]["OnboardingApplicationItem"][];
+            /**
+             * Total
+             * @description 符合条件的申请总数（不受分页影响）
+             */
+            total: number;
+            /**
+             * Page
+             * @description 当前页码（从 1 开始）
+             */
+            page: number;
+            /**
+             * Limit
+             * @description 本次生效的每页条数（上限 100）
+             */
+            limit: number;
+        };
+        /**
+         * OnboardingDecision
+         * @description 平台审核师傅入驻申请的两种结论。
+         *
+         *     这是**业务规则**，不是「接口长什么样」：审核只有「通过」与「驳回」两种，
+         *     与服务商侧那套 ``SettableMasterStatus``（师傅状态能被设成什么）
+         *     是同一类东西——都要 service 层按同一份定义再挡一次，
+         *     不能只靠请求体校验。
+         *
+         *     放在这里（而不是 schema 层）是因为它是**业务规则**：
+         *     接口层用它把非法值变成 422，service 用它把不合法的结论挡在碰库之前。
+         *
+         *     **不是数据库枚举**：它是请求里的一个字段，不落库；
+         *     落库的是 ``MasterStatus``（师傅状态）。
+         * @enum {string}
+         */
+        OnboardingDecision: "APPROVE" | "REJECT";
         /**
          * OrderDetail
          * @description 订单详情。
@@ -2119,6 +2332,64 @@ export interface components {
             master_id: number | null;
         };
         /**
+         * ReviewOnboardingRequest
+         * @description 平台审核入驻申请的请求体。
+         *
+         *     ``decision`` 只有两种取值（APPROVE / REJECT）——它是业务规则，
+         *     定义在 ``app.models.enums.OnboardingDecision``（事实来源）。
+         */
+        ReviewOnboardingRequest: {
+            /** @description 审核结论：APPROVE（通过）/ REJECT（驳回） */
+            decision: components["schemas"]["OnboardingDecision"];
+            /**
+             * Target Provider Id
+             * @description 改判到另一家服务商（可选）。不传则沿用申请里选的那家；传了必须是可加入状态的服务商
+             */
+            target_provider_id?: number | null;
+            /**
+             * Reason
+             * @description 审核备注（可选，写进审计日志）
+             */
+            reason?: string | null;
+        };
+        /**
+         * ReviewOnboardingResponse
+         * @description 审核结果。
+         *
+         *     ``status`` 为空表示「驳回」：驳回是把这一行删掉（没通过审核 = 没入职），
+         *     所以没有状态可回。审核结论留痕在审计日志里。
+         */
+        ReviewOnboardingResponse: {
+            /**
+             * Id
+             * @description 师傅 ID
+             */
+            id: number;
+            /**
+             * Real Name
+             * @description 师傅姓名
+             */
+            real_name: string;
+            /** @description 审核后的状态；为空表示已驳回（该行已删除） */
+            status?: components["schemas"]["MasterStatus"] | null;
+            /**
+             * Provider Id
+             * @description 所属服务商 ID
+             */
+            provider_id: number;
+            /**
+             * Provider Name
+             * @description 所属服务商名称
+             */
+            provider_name: string;
+            /**
+             * Created At
+             * Format: date-time
+             * @description 提交申请的时间
+             */
+            created_at: string;
+        };
+        /**
          * ServiceFlowResult
          * @description 服务流转动作执行后的订单状态。
          */
@@ -2256,6 +2527,25 @@ export interface components {
              * @description 剩余可预约数 = capacity - used
              */
             available: number;
+        };
+        /**
+         * SubmitOnboardingRequest
+         * @description 提交入驻申请的请求体。
+         *
+         *     只有两个字段：师傅姓名与想加入的服务商。
+         *     状态**不在**——登记一律「待审核」（PENDING），要审核通过才入职。
+         */
+        SubmitOnboardingRequest: {
+            /**
+             * Real Name
+             * @description 师傅姓名
+             */
+            real_name: string;
+            /**
+             * Target Provider Id
+             * @description 申请加入的服务商 ID（必须是可加入状态）
+             */
+            target_provider_id: number;
         };
         /**
          * UpdateCategoryRequest
@@ -3245,6 +3535,103 @@ export interface operations {
             };
         };
     };
+    list_joinable_providers_api_v1_masters_joinable_providers_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JoinableProviderListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_onboarding_api_v1_masters_onboarding_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingApplicationItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_onboarding_api_v1_masters_onboarding_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitOnboardingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingApplicationItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_platform_providers_api_v1_platform_providers_get: {
         parameters: {
             query?: {
@@ -3381,6 +3768,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderAdminItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_onboarding_applications_api_v1_platform_masters_get: {
+        parameters: {
+            query?: {
+                /** @description 按状态过滤，不传=全部（前端一般传 PENDING） */
+                status?: components["schemas"]["MasterStatus"] | null;
+                /** @description 页码，从 1 开始 */
+                page?: number;
+                /** @description 每页条数，默认 20，上限 100（超过按 100 算） */
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingApplicationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_onboarding_api_v1_platform_masters__master_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                /** @description 师傅 ID */
+                master_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewOnboardingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewOnboardingResponse"];
                 };
             };
             /** @description Validation Error */
