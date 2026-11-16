@@ -128,6 +128,25 @@ class MasterOrderStatus(str, Enum):
     IN_SERVICE = "IN_SERVICE"
 
 
+class OnboardingDecision(str, Enum):
+    """平台审核师傅入驻申请的两种结论。
+
+    这是**业务规则**，不是「接口长什么样」：审核只有「通过」与「驳回」两种，
+    与服务商侧那套 ``SettableMasterStatus``（师傅状态能被设成什么）
+    是同一类东西——都要 service 层按同一份定义再挡一次，
+    不能只靠请求体校验。
+
+    放在这里（而不是 schema 层）是因为它是**业务规则**：
+    接口层用它把非法值变成 422，service 用它把不合法的结论挡在碰库之前。
+
+    **不是数据库枚举**：它是请求里的一个字段，不落库；
+    落库的是 ``MasterStatus``（师傅状态）。
+    """
+
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+
+
 class CatalogStatus(str, Enum):
     """服务分类 / 服务项目状态。"""
 

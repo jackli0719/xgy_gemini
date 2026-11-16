@@ -27,7 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, require_platform_admin
 from app.core.database import get_session
-from app.models.enums import ProviderStatus
+from app.models.enums import MasterStatus, ProviderStatus
+from app.schemas.master_onboarding import (
+    OnboardingApplicationItem,
+    OnboardingApplicationListResponse,
+    ReviewOnboardingRequest,
+    ReviewOnboardingResponse,
+)
 from app.schemas.platform import (
     CreateProviderAdminRequest,
     CreateProviderRequest,
@@ -36,7 +42,7 @@ from app.schemas.platform import (
     ProviderAdminItem,
     UpdateProviderStatusRequest,
 )
-from app.services import platform_provider
+from app.services import master_onboarding, platform_provider
 
 __all__ = ["router"]
 
@@ -180,4 +186,98 @@ async def create_platform_provider_admin(
         role=admin.role,
         provider_id=admin.provider_id,
         created_at=admin.created_at,
+    )
+
+
+# ==============================================================
+# 师傅入驻审核（T-13）
+#
+# 与上面的服务商管理同一套鉴权：只有 PLATFORM_ADMIN 能审核。
+# 审核对象是「师傅」（master），不是「服务商」——路径里那个 id
+# 是师傅 ID，别与 provider_id 混淆。
+# ==============================================================
+
+
+@router.get(
+    "/masters",
+    response_model=OnboardingApplicationListResponse,
+    summary="入驻申请列表（平台侧，分页）",
+)
+async def list_onboarding_applications(
+    status: MasterStatus | None = Query(
+        None,
+        description="按状态过滤，不传=全部（前端一般传 PENDING）",
+    ),
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    limit: int = Query(
+        master_onboarding.DEFAULT_PAGE_LIMIT,
+        ge=1,
+        description="每页条数，默认 20，上限 100（超过按 100 算）",
+    ),
+    session: AsyncSession = Depends(get_session),
+    current_user: CurrentUser = Depends(require_platform_admin),
+) -> OnboardingApplicationListResponse:
+    """列出师傅入驻申请（平台侧）。
+
+    不传 status 就是全部（含已入职的师傅）；审核页一般只看 PENDING。
+    """
+    applications, total = await master_onboarding.list_onboarding_applications(
+        session,
+        status=status,
+        page=page,
+        limit=limit,
+    )
+    return OnboardingApplicationListResponse(
+        items=[
+            OnboardingApplicationItem(
+                id=application.id,
+                real_name=application.real_name,
+                phone=application.phone,
+                status=application.status,
+                provider_id=application.provider_id,
+                provider_name=application.provider_name,
+                created_at=application.created_at,
+            )
+            for application in applications
+        ],
+        total=total,
+        page=max(page, 1),
+        # 回显实际生效的分页参数：limit 超过上限时这里是被收敛后的值
+        limit=min(max(limit, 1), master_onboarding.MAX_PAGE_LIMIT),
+    )
+
+
+@router.post(
+    "/masters/{master_id}/review",
+    response_model=ReviewOnboardingResponse,
+    summary="审核师傅入驻申请（通过 / 驳回）",
+)
+async def review_onboarding(
+    master_id: Annotated[int, Path(ge=1, description="师傅 ID")],
+    payload: ReviewOnboardingRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: CurrentUser = Depends(require_platform_admin),
+) -> ReviewOnboardingResponse:
+    """审核一份入驻申请。
+
+    通过 -> 师傅状态转「已入驻」（ACTIVE），可选改判到另一家服务商；
+    驳回 -> 这一行删掉（没通过审核 = 没入职），账号角色回退成普通用户。
+
+    申请不存在 / 已经不是「待审核」-> 404（两种情况同构）。
+    """
+    reviewed = await master_onboarding.review_onboarding(
+        session,
+        current_user=current_user,
+        master_id=master_id,
+        decision=payload.decision,
+        target_provider_id=payload.target_provider_id,
+        reason=payload.reason,
+    )
+    return ReviewOnboardingResponse(
+        id=reviewed.id,
+        real_name=reviewed.real_name,
+        status=reviewed.status,
+        provider_id=reviewed.provider_id,
+        provider_name=reviewed.provider_name,
+        created_at=reviewed.created_at,
     )

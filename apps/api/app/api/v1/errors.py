@@ -36,6 +36,11 @@ from app.services.errors import (
     MasterActionInvariantError,
     MasterNotDispatchableError,
     MasterNotFoundError,
+    MasterOnboardingConflictError,
+    MasterOnboardingError,
+    MasterOnboardingForbiddenError,
+    MasterOnboardingInvariantError,
+    MasterOnboardingNotFoundError,
     MasterOrderStatusNotAllowedError,
     MasterQueryError,
     MasterQueryForbiddenError,
@@ -70,6 +75,7 @@ __all__ = [
     "EXCEPTION_STATUS_MAP",
     "GENERIC_DETAIL",
     "MASTER_ACTION_GENERIC_DETAIL",
+    "MASTER_ONBOARDING_GENERIC_DETAIL",
     "MASTER_QUERY_GENERIC_DETAIL",
     "PLATFORM_CATALOG_GENERIC_DETAIL",
     "PLATFORM_PROVIDER_GENERIC_DETAIL",
@@ -78,6 +84,7 @@ __all__ = [
     "catalog_error_handler",
     "dispatch_error_handler",
     "master_action_error_handler",
+    "master_onboarding_error_handler",
     "master_query_error_handler",
     "place_order_error_handler",
     "platform_catalog_error_handler",
@@ -158,6 +165,16 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     PlatformCatalogConflictError: 409,
     # 平台侧品类 / 服务项管理：角色不对（依赖层已经挡住，这里是 service 兜底）
     PlatformCatalogForbiddenError: 403,
+    # 师傅入驻：角色不对 / 已经在师傅体系里
+    MasterOnboardingForbiddenError: 403,
+    # 师傅入驻：入驻申请不存在，或目标服务商不存在 / 不可加入
+    # 「不存在」与「不可加入」共用同一个异常、同一句话（不暴露服务商名单）
+    MasterOnboardingNotFoundError: 404,
+    # 师傅入驻：重复申请 / 审核条件已变（并发）
+    # 「换个时候再来 / 刷新后重试」是可行的应对 -> 409
+    MasterOnboardingConflictError: 409,
+    # 师傅入驻：内部一致性被打破（服务端 bug）
+    MasterOnboardingInvariantError: 500,
     # 兜底：其余业务异常
     PlaceOrderError: 400,
     DispatchError: 400,
@@ -168,6 +185,7 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     CatalogError: 400,
     PlatformProviderError: 400,
     PlatformCatalogError: 400,
+    MasterOnboardingError: 400,
 }
 
 # 兜底文案。用于 PlaceOrderError 基类——它的消息可能内嵌数据库错误原文
@@ -197,6 +215,9 @@ PLATFORM_PROVIDER_GENERIC_DETAIL = "服务商管理失败"
 
 # 平台侧品类 / 服务项管理的兜底文案
 PLATFORM_CATALOG_GENERIC_DETAIL = "目录管理失败"
+
+# 师傅入驻（登记 / 审核）的兜底文案
+MASTER_ONBOARDING_GENERIC_DETAIL = "入驻失败"
 
 
 def status_for(exc: BaseException) -> int:
@@ -352,6 +373,22 @@ async def platform_catalog_error_handler(request: Request, exc: Exception) -> JS
         PLATFORM_CATALOG_GENERIC_DETAIL
         if type(exc) is PlatformCatalogError
         else (str(exc) or PLATFORM_CATALOG_GENERIC_DETAIL)
+    )
+    return JSONResponse(
+        status_code=status_for(exc),
+        content={"detail": detail},
+    )
+
+
+async def master_onboarding_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """把师傅入驻相关的业务异常翻译成 HTTP 响应。
+
+    响应体统一是 ``{"detail": ...}``。
+    """
+    detail = (
+        MASTER_ONBOARDING_GENERIC_DETAIL
+        if type(exc) is MasterOnboardingError
+        else (str(exc) or MASTER_ONBOARDING_GENERIC_DETAIL)
     )
     return JSONResponse(
         status_code=status_for(exc),

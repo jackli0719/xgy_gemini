@@ -55,6 +55,11 @@ from app.services.errors import (
     MasterActionInvariantError,
     MasterNotDispatchableError,
     MasterNotFoundError,
+    MasterOnboardingConflictError,
+    MasterOnboardingError,
+    MasterOnboardingForbiddenError,
+    MasterOnboardingInvariantError,
+    MasterOnboardingNotFoundError,
     MasterOrderStatusNotAllowedError,
     MasterQueryError,
     MasterQueryForbiddenError,
@@ -232,6 +237,12 @@ def test_exception_status_map_contents() -> None:
         PlatformCatalogConflictError: 409,
         PlatformCatalogForbiddenError: 403,
         PlatformCatalogError: 400,
+        # 师傅入驻（T-13：登记 / 平台审核）
+        MasterOnboardingForbiddenError: 403,
+        MasterOnboardingNotFoundError: 404,
+        MasterOnboardingConflictError: 409,
+        MasterOnboardingInvariantError: 500,
+        MasterOnboardingError: 400,
     }
 
 
