@@ -25,4 +25,10 @@ export const mockClient = {
   finishService: vi.fn(),
   /** POST /api/v1/auth/login */
   login: vi.fn(),
+  /** GET /api/v1/masters/joinable-providers */
+  listJoinableProviders: vi.fn(),
+  /** POST /api/v1/masters/onboarding */
+  createOnboarding: vi.fn(),
+  /** GET /api/v1/masters/onboarding */
+  getMyOnboarding: vi.fn(),
 };

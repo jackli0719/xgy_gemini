@@ -51,4 +51,31 @@ describe("登录页（师傅端）", () => {
     expect(localStorage.getItem("oto.master.token")).toBe("token-abc");
     await waitForPath(router, "/orders");
   });
+
+  it("还不是师傅的账号 -> 登录后落到申请入驻页", async () => {
+    // 还没入职的账号（role=USER）：订单接口对它来说是 403，
+    // 师傅端唯一能进的页面就是入驻申请页
+    mockClient.login.mockResolvedValue({
+      access_token: "token-user",
+      token_type: "bearer",
+      user: {
+        id: 9,
+        nickname: "李师傅",
+        phone: "13900000009",
+        role: "USER",
+        provider_id: null,
+      },
+    });
+    const { pinia, router } = await setupApp("/login");
+
+    const wrapper = mount(LoginView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="phone-field"] input').setValue("13900000009");
+    await wrapper.find('[data-test="code-field"] input').setValue("123456");
+    await wrapper.find('[data-test="submit-login"]').trigger("click");
+    await flushPromises();
+
+    await waitForPath(router, "/onboard");
+  });
 });

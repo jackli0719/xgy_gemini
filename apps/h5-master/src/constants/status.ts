@@ -4,7 +4,7 @@
  * 状态取值来自后端的 12 态状态机（见 apps/api/app/models/enums.py），
  * 这里只做展示映射，不参与任何业务判断。
  */
-import type { OrderStatus } from "@oto/shared/api";
+import type { MasterStatus, OrderStatus } from "@oto/shared/api";
 
 export const ORDER_STATUS_TEXT: Record<OrderStatus, string> = {
   PENDING_PAY: "待支付",
@@ -33,3 +33,17 @@ export const WORK_TABS = [
   { status: "ACCEPTED", title: "待服务" },
   { status: "IN_SERVICE", title: "服务中" },
 ] as const;
+
+/**
+ * 师傅状态的中文文案。
+ *
+ * 取值来自后端的 MasterStatus（见 apps/api/app/models/enums.py）：
+ * PENDING 待审核 / ACTIVE 已入职 / ON_LEAVE 休假 / DISABLED 停用。
+ * 这里只做展示映射，不参与任何业务判断。
+ */
+export const MASTER_STATUS_TEXT: Record<MasterStatus, string> = {
+  PENDING: "审核中",
+  ACTIVE: "已入职",
+  ON_LEAVE: "休假中",
+  DISABLED: "已停用",
+};

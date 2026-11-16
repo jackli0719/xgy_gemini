@@ -5,7 +5,10 @@
  * - 验证码是 **MVP 占位**：后端写死 123456（见后端 app.core.config 的
  *   login_sms_code），不接短信网关；
  * - 登录成功后把 token 写进会话 store（localStorage），
- *   再跳回 redirect 参数指向的地方；没有 redirect 就回订单页。
+ *   再跳回 redirect 参数指向的地方；没有 redirect 就按身份分流：
+ *   **是师傅**（role=MASTER）回订单页，**不是师傅**（还没入职的账号）
+ *   去申请入驻页——订单接口要 MASTER 角色，没入职的账号在师傅端
+ *   没有别的页面可去。
  *
  * redirect 只接受站内路径：以 "//" 开头的是协议相对 URL（能跳到外站），
  * 一律当没有 redirect 处理。
@@ -27,12 +30,12 @@ const submitting = ref(false);
 const error = ref("");
 
 /** 登录后要去的路径（只允许站内绝对路径）。 */
-function targetPath(): string {
+function targetPath(fallback: string): string {
   const target = firstQuery(route.query.redirect);
   if (target && target.startsWith("/") && !target.startsWith("//")) {
     return target;
   }
-  return "/orders";
+  return fallback;
 }
 
 async function submit(): Promise<void> {
@@ -58,7 +61,9 @@ async function submit(): Promise<void> {
       phone: result.user.phone,
       role: result.user.role,
     });
-    await router.replace(targetPath());
+    // 没入职的账号落地到申请页（订单页对它来说是 403）
+    const fallback = result.user.role === "MASTER" ? "/orders" : "/onboard";
+    await router.replace(targetPath(fallback));
   } catch (err) {
     error.value = err instanceof Error ? err.message : "登录失败";
   } finally {
