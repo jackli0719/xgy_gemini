@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select, update
@@ -116,9 +116,9 @@ async def generate_pending_settlements(
     才进结算单——这就是 T+1 的含义。
 
     为什么按业务零点而不是「完工后满 24 小时」：满 24 小时是绝对时长，
-    跟「一天」对不上。UTC 16:00 完工（= 北京时间次日 00:00）的单，
-    按绝对时长要等到北京时间次日 07:30 才满 24 小时；
-    按业务日期（T+1）则是次日零点整就该进结算——业务上更说得通，
+    跟「一天」对不上。业务时间 07:30 完工的单，按绝对时长要等到
+    次日 07:30 才满 24 小时；按业务日期（T+1）则是次日零点整就该进结算——
+    提前了 7.5 小时，业务上更说得通，
     也跟「今天 / 昨天」这些业务日期是同一个口径。
 
     **不抛业务异常**：单个服务商那一组失败只记日志，继续下一组。

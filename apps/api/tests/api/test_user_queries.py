@@ -18,14 +18,13 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from tests.support import business_today
 from app.core.auth import create_access_token
 from app.core.database import get_session
 from app.main import app
@@ -36,6 +35,7 @@ from app.models.enums import CatalogStatus, OrderStatus, PayStatus, UserRole
 from app.models.order import Order
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
+from tests.support import business_today
 
 CATALOG_URL = "/api/v1/catalog"
 ORDERS_URL = "/api/v1/orders"

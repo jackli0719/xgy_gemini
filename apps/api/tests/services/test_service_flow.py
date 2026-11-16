@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -25,7 +25,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.service_flow as service_flow_module
-from tests.support import business_today
 from app.api.v1.errors import status_for
 from app.core.auth import CurrentUser
 from app.models.address import Address
@@ -55,6 +54,7 @@ from app.services.service_flow import (
     start_service,
 )
 from support import Rendezvous, RendezvousSession
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 

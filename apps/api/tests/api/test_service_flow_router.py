@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import inspect
 import os
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -23,7 +23,6 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from tests.support import business_today
 from app.core.auth import create_access_token
 from app.core.database import get_session
 from app.main import app
@@ -42,6 +41,7 @@ from app.models.provider import Master, ServiceProvider
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
 from app.schemas.service_flow import ServiceFlowResult
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 

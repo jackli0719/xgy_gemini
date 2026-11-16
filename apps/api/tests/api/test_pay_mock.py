@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.api.v1.pay as pay_module
 import app.services.pay_mock as pay_mock_module
-from tests.support import business_today
 from app.core.config import settings
 from app.core.database import get_session
 from app.domain.order_state import OrderTransitionError
@@ -40,6 +39,7 @@ from app.models.user import User
 from app.schemas.pay import MockPayNotifyRequest, MockPayResult
 from app.services.errors import InvalidOrderStateError, OrderNotFoundError
 from app.services.pay_mock import mock_pay_success
+from tests.support import business_today
 
 MOCK_URL = "/api/v1/pay/mock-notify"
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")

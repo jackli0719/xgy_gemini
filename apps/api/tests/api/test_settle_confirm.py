@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -24,7 +24,6 @@ import pytest
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from tests.support import business_today
 from app.api.v1 import settlements as confirm_router
 from app.core.auth import CurrentUser, create_access_token
 from app.core.database import get_session
@@ -54,6 +53,7 @@ from app.services.errors import (
 )
 from app.services.settle import confirm_settlement
 from support import Rendezvous
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 

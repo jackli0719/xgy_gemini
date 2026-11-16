@@ -5,6 +5,10 @@
  * `apps/api/app/core/timezone.py`）。前端必须跟它一致——两边算出来的
  * 「今天」差一天的话，用户看到的可选时段、订单时间就会跟后端对不上。
  *
+ * **时区名只有一份真相**：`BUSINESS_TIME_ZONE` 直接取自
+ * `timezone-contract.json` 的 `timeZone` 字段（前后端共用的那份），
+ * 不在这里再写一遍字面量——写两遍迟早只改一处。
+ *
  * **一律用 Intl.DateTimeFormat 显式指定 timeZone**，不要用
  * `date.getDate()` / `date.toLocaleDateString()`：
  * - `getDate()` 取的是**运行环境本地时区**的日期，同一份数据在
@@ -13,9 +17,11 @@
  *
  * 显式指定之后，格式与时区都由代码说了算，不受运行环境影响。
  */
-export const BUSINESS_TIME_ZONE = "Asia/Shanghai";
+import { TIMEZONE_CONTRACT } from "./contract";
 
-export { TIMEZONE_CONTRACT } from "./contract";
+export const BUSINESS_TIME_ZONE = TIMEZONE_CONTRACT.timeZone;
+
+export { TIMEZONE_CONTRACT };
 export type { TimezoneContractCase } from "./contract";
 
 /**

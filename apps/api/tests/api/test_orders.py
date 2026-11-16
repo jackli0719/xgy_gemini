@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, time, timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
@@ -25,7 +25,6 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.api.v1.orders as orders_module
-from tests.support import business_today
 from app.api.v1.errors import EXCEPTION_STATUS_MAP, status_for
 from app.core.auth import create_access_token
 from app.core.config import settings
@@ -83,6 +82,7 @@ from app.services.errors import (
     SlotNotFoundError,
     SlotNotInFutureError,
 )
+from tests.support import business_today
 
 ORDER_URL = "/api/v1/orders"
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")

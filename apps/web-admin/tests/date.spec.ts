@@ -8,11 +8,15 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { TIMEZONE_CONTRACT } from "@oto/shared/timezone";
+import { BUSINESS_TIME_ZONE, TIMEZONE_CONTRACT } from "@oto/shared/timezone";
 
 import { formatDateTime } from "@/utils/date";
 
 describe("formatDateTime（业务时区）", () => {
+  it("BUSINESS_TIME_ZONE 就是契约里的时区（不写第二份真相）", () => {
+    expect(BUSINESS_TIME_ZONE).toBe(TIMEZONE_CONTRACT.timeZone);
+  });
+
   it("逐条对上前后端共用的时区契约", () => {
     for (const item of TIMEZONE_CONTRACT.cases) {
       expect(formatDateTime(item.instant), item.why).toBe(item.businessDateTime);

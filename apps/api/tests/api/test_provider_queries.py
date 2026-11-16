@@ -18,14 +18,13 @@
 from __future__ import annotations
 
 import os
-from datetime import date, time, timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from tests.support import business_today
 from app.core.auth import create_access_token
 from app.core.database import get_session
 from app.main import app
@@ -42,6 +41,7 @@ from app.models.order import Order
 from app.models.provider import Master, ServiceProvider
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
+from tests.support import business_today
 
 ORDERS_URL = "/api/v1/provider/orders"
 MASTERS_URL = "/api/v1/provider/masters"

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app.core.timezone import today
 from app.domain.order_no import OrderNoError, generate_order_no
 
 FIXED_NOW = datetime(2026, 11, 14, tzinfo=timezone.utc)
@@ -74,11 +75,25 @@ def test_order_no_error_is_value_error() -> None:
 # ------------------------------------------------------------ 默认时间
 
 
-def test_order_no_defaults_to_utc_today() -> None:
-    """不传 now 时，日期部分等于 UTC 当天。"""
+def test_order_no_defaults_to_business_today() -> None:
+    """不传 now 时，日期部分等于**业务时区**的今天（app.core.timezone.today()）。
+
+    不是 UTC 日期：UTC 23:30 时国内已经是次日，订单号上的日期要跟
+    用户看到的那个白天一致。
+    """
     number = generate_order_no()
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
-    assert number[3:11] == today
+    assert number[3:11] == today().strftime("%Y%m%d")
+
+
+def test_order_no_at_2330_utc_uses_next_business_day() -> None:
+    """now = UTC 23:30 时，日期部分是**次日**——不是 UTC 当天。
+
+    UTC 2026-11-14 23:30 = 北京时间 2026-11-15 07:30，业务日期已经是 11-15。
+    """
+    number = generate_order_no(
+        now=datetime(2026, 11, 14, 23, 30, tzinfo=timezone.utc), rand=1
+    )
+    assert number == "OTO20261115000001"
 
 
 # ------------------------------------------------------------ 随机性

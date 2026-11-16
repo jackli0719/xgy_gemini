@@ -19,14 +19,13 @@ from __future__ import annotations
 
 import inspect
 import os
-from datetime import date, time, timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from tests.support import business_today
 from app.api.v1 import master as master_router_module
 from app.api.v1.errors import status_for
 from app.core.auth import create_access_token
@@ -48,6 +47,7 @@ from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
 from app.schemas.master import MasterOrderDetail, MasterOrderItem, MasterProfile
 from app.services.errors import MasterQueryForbiddenError
+from tests.support import business_today
 
 ORDERS_URL = "/api/v1/master/orders"
 PROFILE_URL = "/api/v1/master/profile"

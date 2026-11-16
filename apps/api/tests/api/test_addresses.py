@@ -14,14 +14,13 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, time, timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from tests.support import business_today
 from app.core.auth import create_access_token
 from app.core.database import get_session
 from app.main import app
@@ -32,6 +31,7 @@ from app.models.enums import OrderStatus, PayStatus, UserRole
 from app.models.order import Order
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
+from tests.support import business_today
 
 ADDRESSES_URL = "/api/v1/addresses"
 ORDERS_URL = "/api/v1/orders"

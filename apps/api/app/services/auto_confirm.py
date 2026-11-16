@@ -5,7 +5,8 @@
 挂着，客户的订单也一直亮着。本 service 把这类订单自动收尾：
 
 - 找出停在「待确认」且**超时**（``updated_at`` 早于 ``now - threshold``）的订单
-  （``now`` 取**业务时区**的「现在」，默认 Asia/Shanghai）；
+  （``now`` 取**业务时区**的「现在」，默认 Asia/Shanghai；
+  阈值 N 小时是**绝对时长**，与时区无关，naive 时间一律按 UTC 解释）；
 - 逐笔转成「已完成」，标记 ``auto_confirmed=True``；
 - 同样写订单状态流转日志（R4）：操作方是系统，不是任何人。
 
@@ -68,7 +69,11 @@ async def auto_confirm_expired(
     （默认 24 小时）。传入的 session 不能有活动事务——本函数自己管理事务。
 
     ``now`` 为 None 时取**业务时区**的「现在」（默认 Asia/Shanghai，
-    见 app.core.timezone）；传进来的必须是带时区的时间，naive 视为 UTC。
+    见 app.core.timezone）。
+
+    **N 小时是绝对时长，与时区无关**：阈值就是 N 小时，不随业务时区
+    改变长度；``now`` 只提供起算点。**naive 时间一律按 UTC 解释**
+    （不按运行环境的本地时区猜）。
 
     **不抛业务异常**：单笔失败只记日志，继续处理下一笔。
     """

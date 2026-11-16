@@ -24,7 +24,6 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from tests.support import business_today
 from app.core.timezone import business_date, business_datetime
 from app.models.address import Address
 from app.models.audit_log import AuditLog
@@ -53,6 +52,7 @@ from app.services.settle import (
     _split_amounts,
     generate_pending_settlements,
 )
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -76,6 +76,10 @@ ORDER_A2_ID = 2  # 服务商 A，50.00，2 天前完工
 ORDER_B1_ID = 4  # 服务商 B，200.00，2 天前完工
 # 服务商 A，60.00，UTC 16:00 完工（= 北京时间次日 00:00），边界用例专用
 ORDER_C1_ID = 5
+# 服务商 A，60.00，业务日 23:59 完工（= UTC 15:59），边界用例专用
+ORDER_C2_ID = 6
+# 服务商 A，60.00，业务日 00:01 完工（= 前一日 UTC 16:01），边界用例专用
+ORDER_C3_ID = 7
 # 刚完工，没满 T+1，不该进结算
 ORDER_A3_ID = 3  # 服务商 A，80.00，1 小时前完工
 
@@ -84,6 +88,8 @@ ORDER_A2_NO = "OTO20260401000002"
 ORDER_A3_NO = "OTO20260401000003"
 ORDER_B1_NO = "OTO20260401000004"
 ORDER_C1_NO = "OTO20260401000005"
+ORDER_C2_NO = "OTO20260401000006"
+ORDER_C3_NO = "OTO20260401000007"
 
 PROVIDER_A_RATE = Decimal("0.2000")
 PROVIDER_B_RATE = Decimal("0.1000")
@@ -782,3 +788,105 @@ async def test_t_plus_one_boundary_is_business_midnight(db, seeded) -> None:
         if s.id == c1_items[0].settlement_id
     )
     assert c1_settlement.period_end == date(2026, 11, 15)
+
+
+# ---------------------------------------------------------------------
+# 9. 完工时刻在业务日的哪个位置：都按「次日业务零点」转
+# ---------------------------------------------------------------------
+
+
+async def _add_completed_order(
+    db,
+    *,
+    order_id: int,
+    order_no: str,
+    completed_at: datetime,
+) -> None:
+    """种一笔「已完成」的订单（服务商甲），完工时刻由调用方指定。"""
+    maker = _maker(db)
+    async with maker() as session:
+        session.add(
+            Order(
+                id=order_id,
+                order_no=order_no,
+                user_id=CUSTOMER_USER_ID,
+                provider_id=PROVIDER_A_ID,
+                master_id=MASTER_A_ID,
+                address_id=3,
+                item_id=2,
+                slot_id=4,
+                amount=Decimal("60.00"),
+                status=OrderStatus.COMPLETED,
+                pay_status=PayStatus.PAID,
+                paid_at=completed_at,
+                dispatched_at=completed_at,
+                accepted_at=completed_at,
+                completed_at=completed_at,
+                updated_at=completed_at,
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.integration
+async def test_completed_at_business_2359_settles_at_next_business_midnight(
+    db, seeded
+) -> None:
+    """业务日 23:59 完工的单，**次日业务零点**就该进 PENDING_SETTLE。
+
+    这一条盯的是「T+1 = 业务零点」而不是「满 24 小时」：离完工才 1 分钟，
+    下一个业务零点一到就进结算。按「满 24 小时」要等到次日 23:59。
+
+    时刻换算（北京时间 = UTC + 8）：
+    - 完工 2026-11-14 23:59 = 2026-11-14T15:59Z；
+    - 次日业务零点 2026-11-15 00:00 = 2026-11-14T16:00Z。
+    """
+    await _add_completed_order(
+        db,
+        order_id=ORDER_C2_ID,
+        order_no=ORDER_C2_NO,
+        completed_at=datetime(2026, 11, 14, 15, 59, tzinfo=timezone.utc),
+    )
+
+    # 次日业务零点之前（北京时间 11-14 23:59:59）：还是「已完成」
+    await _run(db, now=datetime(2026, 11, 14, 15, 59, 59, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C2_ID)
+    assert order.status == OrderStatus.COMPLETED
+
+    # 次日业务零点一到（北京时间 11-15 00:00）：转「待结算」
+    await _run(db, now=datetime(2026, 11, 14, 16, 0, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C2_ID)
+    assert order.status == OrderStatus.PENDING_SETTLE
+
+
+@pytest.mark.integration
+async def test_completed_at_business_0001_settles_only_next_business_midnight(
+    db, seeded
+) -> None:
+    """业务日 00:01 完工的单，**当日业务零点**不动它，次日零点才转。
+
+    刚过零点就完工的单最容易算错：它离「当日零点」只有 1 分钟，
+    但 T+1 的「天」是**业务日**——当日零点时它才刚完工（还没满一天），
+    要到次日零点才进结算。
+
+    时刻换算（北京时间 = UTC + 8）：
+    - 完工 2026-11-14 00:01 = 2026-11-13T16:01Z；
+    - 当日业务零点 2026-11-14 00:00 = 2026-11-13T16:00Z；
+    - 次日业务零点 2026-11-15 00:00 = 2026-11-14T16:00Z。
+    """
+    await _add_completed_order(
+        db,
+        order_id=ORDER_C3_ID,
+        order_no=ORDER_C3_NO,
+        completed_at=datetime(2026, 11, 13, 16, 1, tzinfo=timezone.utc),
+    )
+
+    # 当日业务零点（北京时间 11-14 00:00）：这一单 00:01 才完工，还不动它
+    await _run(db, now=datetime(2026, 11, 13, 16, 0, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C3_ID)
+    assert order.status == OrderStatus.COMPLETED
+
+    # 次日业务零点（北京时间 11-15 00:00）：才转「待结算」
+    await _run(db, now=datetime(2026, 11, 14, 16, 0, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C3_ID)
+    assert order.status == OrderStatus.PENDING_SETTLE

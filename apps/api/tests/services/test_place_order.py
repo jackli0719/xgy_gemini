@@ -20,7 +20,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.place_order as place_order_module
-from tests.support import business_today
 from app.core.timezone import business_datetime
 from app.domain.slot_rule import SlotNotReservableError
 from app.models.address import Address
@@ -41,6 +40,7 @@ from app.services.errors import (
     SlotNotInFutureError,
 )
 from app.services.place_order import place_order
+from tests.support import business_today
 
 # =====================================================================
 # 单元测试：最小 AsyncSession 替身
