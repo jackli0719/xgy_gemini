@@ -26,6 +26,8 @@ export type OrderStatus = Schemas["OrderStatus"];
 export type PayStatus = Schemas["PayStatus"];
 /** 结算单状态。 */
 export type SettlementStatus = Schemas["SettlementStatus"];
+/** 师傅状态（入驻流程 + 在职状态）。 */
+export type MasterStatus = Schemas["MasterStatus"];
 
 /** 成功状态码：下单是 201，其余业务动作是 200，删除是 204（无响应体）。 */
 type SuccessStatus = 200 | 201 | 204;
@@ -125,6 +127,9 @@ type CreatePlatformCategoryOp = operations["create_platform_category_api_v1_plat
 type UpdatePlatformCategoryOp = operations["update_platform_category_api_v1_platform_categories__category_id__patch"];
 type CreatePlatformItemOp = operations["create_platform_item_api_v1_platform_items_post"];
 type UpdatePlatformItemOp = operations["update_platform_item_api_v1_platform_items__item_id__patch"];
+type ListJoinableProvidersOp = operations["list_joinable_providers_api_v1_masters_joinable_providers_get"];
+type SubmitOnboardingOp = operations["submit_onboarding_api_v1_masters_onboarding_post"];
+type GetMyOnboardingOp = operations["get_my_onboarding_api_v1_masters_onboarding_get"];
 
 
 /** 从错误响应体里挑出文案。 */
@@ -412,6 +417,46 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /** 我的资料（姓名 / 评分 / 状态 / 所属服务商）。 */
     getMasterProfile(): Promise<ResponseOf<GetMasterProfileOp>> {
       return send<GetMasterProfileOp>("GET", "/api/v1/master/profile");
+    },
+
+    // -----------------------------------------------------------------
+    // 入驻申请（师傅自己申请，平台审核）
+    //
+    // 这几个接口**不传 user_id**：申请人的身份来自 token
+    // （服务端按 token 里的 user_id 查 master 行），客户端自报身份
+    // 等于自己挑账号（R1）。
+    // -----------------------------------------------------------------
+
+    /**
+     * 可以申请加入的服务商列表（只有 id 与名称）。
+     *
+     * 只有**营业中**的服务商会出现：冻结 / 待审核的服务商收不了人。
+     */
+    listJoinableProviders(): Promise<ResponseOf<ListJoinableProvidersOp>> {
+      return send<ListJoinableProvidersOp>("GET", "/api/v1/masters/joinable-providers");
+    },
+
+    /**
+     * 提交入驻申请（登记为「待审核」）。
+     *
+     * 请求体只有姓名与**想加入**的服务商（`target_provider_id`）；
+     * 归属由平台审核确认，不是客户端自定的。
+     * 已经申请过 / 已入职时服务端返回 409。
+     */
+    createOnboarding(
+      body: RequestBodyOf<SubmitOnboardingOp>,
+    ): Promise<ResponseOf<SubmitOnboardingOp>> {
+      return send<SubmitOnboardingOp>("POST", "/api/v1/masters/onboarding", { body });
+    },
+
+    /**
+     * 我的入驻申请。
+     *
+     * **没有申请时后端返回 404**（客户端据此显示申请表单），
+     * 所以调用方要按状态码分流，不要把 404 当成接口坏了。
+     */
+    getMyOnboarding(): Promise<ResponseOf<GetMyOnboardingOp>> {
+      return send<GetMyOnboardingOp>("GET", "/api/v1/masters/onboarding");
     },
 
     // -----------------------------------------------------------------

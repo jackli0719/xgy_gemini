@@ -41,6 +41,11 @@ body {
   margin: 4px 4px 8px;
 }
 
+/* 页面里成块的内容（与 h5-user 的同名类保持一致） */
+.page-block {
+  margin: 12px 4px;
+}
+
 .page-footer {
   display: flex;
   align-items: center;
