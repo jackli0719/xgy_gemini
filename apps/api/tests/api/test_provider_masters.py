@@ -271,7 +271,7 @@ async def test_patch_own_master_status_writes_audit_log(api_client, seeded, db) 
     """
     headers = _admin_a_headers(seeded)
     response = await api_client.patch(
-        "{}/{}".format(MASTERS_URL, seeded["master_a2"]),
+        "{}/{}".format(MASTERS_URL, seeded["master_a1"]),
         json={"status": "DISABLED"},
         headers=headers,
     )
@@ -282,11 +282,57 @@ async def test_patch_own_master_status_writes_audit_log(api_client, seeded, db) 
         # 库里的状态确实改了
         master = (
             await session.execute(
-                select(Master).where(Master.id == seeded["master_a2"])
+                select(Master).where(Master.id == seeded["master_a1"])
             )
         ).scalar_one()
         assert master.status == MasterStatus.DISABLED
 
+        logs = (
+            (
+                await session.execute(
+                    select(AuditLog).where(
+                        AuditLog.target_type == "master",
+                        AuditLog.target_id == seeded["master_a1"],
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(logs) == 1
+        log = logs[0]
+        assert log.field_name == "status"
+        assert log.old_value == "ACTIVE"
+        assert log.new_value == "DISABLED"
+        assert log.operator_type == OperatorType.PROVIDER_ADMIN
+        assert log.operator_id == seeded["admin_a"]
+        assert log.provider_id == seeded["provider_a"]
+
+
+@pytest.mark.integration
+async def test_patch_pending_master_status_is_409(api_client, seeded, db) -> None:
+    """待审核（PENDING）的师傅，服务商改不动他的状态 -> 409。
+
+    PENDING 是入驻流程的初始状态，只能由平台审核流转
+    （见 app.services.master_onboarding.review_onboarding）。
+    服务商提前把待审核的师傅置成 ACTIVE，等于绕过平台审核那道闸门——
+    派单那头会真的把单派给他。
+    """
+    headers = _admin_a_headers(seeded)
+    response = await api_client.patch(
+        "{}/{}".format(MASTERS_URL, seeded["master_a2"]),
+        json={"status": "ACTIVE"},
+        headers=headers,
+    )
+    assert response.status_code == 409
+
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    async with maker() as session:
+        master = (
+            await session.execute(
+                select(Master).where(Master.id == seeded["master_a2"])
+            )
+        ).scalar_one()
         logs = (
             (
                 await session.execute(
@@ -299,14 +345,10 @@ async def test_patch_own_master_status_writes_audit_log(api_client, seeded, db) 
             .scalars()
             .all()
         )
-        assert len(logs) == 1
-        log = logs[0]
-        assert log.field_name == "status"
-        assert log.old_value == "PENDING"
-        assert log.new_value == "DISABLED"
-        assert log.operator_type == OperatorType.PROVIDER_ADMIN
-        assert log.operator_id == seeded["admin_a"]
-        assert log.provider_id == seeded["provider_a"]
+
+    # 状态没变，也没有留下任何「改过」的痕迹
+    assert master.status == MasterStatus.PENDING
+    assert logs == []
 
 
 @pytest.mark.integration

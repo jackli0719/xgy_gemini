@@ -23,7 +23,7 @@
   服务商侧师傅管理、平台侧服务商管理与品类管理与订单总览、结算单生成（T+1）与财务确认、
   **师傅自助入驻（登记 → 平台审核）**。
 - 前端三端：用户登录/地址/服务/下单；师傅待接单/开工完工；后台派单、师傅管理、服务商管理、订单总览、品类管理、结算确认。
-- 质量：后端 931 个用例（集成 344 个真跑、0 skip）、前端三端 94 个用例、API 级四端闭环 E2E、变异测试。
+- 质量：后端 934 个用例（集成 347 个真跑、0 skip）、前端三端 94 个用例、API 级四端闭环 E2E、变异测试。
 - 时区：全仓统一 Asia/Shanghai，业务日期（今天/时段/阈值/结算周期）按业务时区算，存库仍是 UTC timestamptz。
 
 ## 未完成
@@ -74,7 +74,7 @@
 ## CI 现状
 
 - **触发**：PR 到 `main`、push 到 `main` 各跑一遍；同 ref 新提交取消旧跑批。
-- **后端 job**：pytest 单元 + 集成分两轮跑；集成测试**不许静默 skip**；再单独数一遍收集到的集成用例数，低于 `EXPECTED_INTEGRATION_TESTS`（现 344）直接红。
+- **后端 job**：pytest 单元 + 集成分两轮跑；集成测试**不许静默 skip**；再单独数一遍收集到的集成用例数，低于 `EXPECTED_INTEGRATION_TESTS`（现 347）直接红。
 - **前端 job**：三个 workspace 各自 typecheck / test / build，矩阵展开成 3 个检查。
 - **最近结果**：PR #7 绿（已合并进 `main`）；`main` push #7 绿。历史故意造红的验证 PR（#2）确实红过，门禁有效。
 - **Secrets**：`DATABASE_URL` / `TEST_DATABASE_URL` / `REDIS_URL` / `JWT_SECRET` / `POSTGRES_PASSWORD` 已配；`LOGIN_SMS_CODE` 未配（CI 里 `APP_ENV=dev`，走占位码）。

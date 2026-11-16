@@ -29,6 +29,7 @@ __all__ = [
     "MasterOnboardingInvariantError",
     "MasterOnboardingNotFoundError",
     "MasterOrderStatusNotAllowedError",
+    "MasterPendingNotSettableError",
     "MasterQueryError",
     "MasterQueryForbiddenError",
     "MasterStatusNotSettableError",
@@ -155,6 +156,20 @@ class MasterStatusNotSettableError(DispatchError):
     PENDING（待审核）是入驻流程的初始状态，服务商改不回去。
     接口层用窄枚举挡过一次（PENDING -> 422），service 这边再挡一次：
     类型提示挡不住运行时传错值。
+    """
+
+
+class MasterPendingNotSettableError(DispatchError):
+    """待审核（PENDING）的师傅，服务商侧不能改他的状态。
+
+    PENDING 是入驻流程的初始状态，只能由**平台审核**流转
+    （见 app.services.master_onboarding.review_onboarding）。
+    服务商提前把他置成 ACTIVE，等于绕过平台审核那道闸门；
+    置成 DISABLED / ON_LEAVE 也不对——这位师傅还没入职，
+    服务商根本不该动他的入职状态。
+
+    -> 409：等服务商 / 平台把状态改掉再来（或换个人操作），
+    不是 404（这个师傅确实存在且在本商作用域内）。
     """
 
 

@@ -32,6 +32,11 @@
 这条规则由 ``app.models.enums.SettableMasterStatus`` 表达（**事实来源**），
 接口层用它把 PENDING 变成 422，service 用它把不合法的状态挡在库外——
 两道防线共用同一份定义，不会各写各的。
+
+**待审核（PENDING）的师傅，服务商侧一个字都改不了**：
+入职状态只能由平台审核流转（见 app.services.master_onboarding.review_onboarding）。
+服务商提前把待审核的师傅置成 ACTIVE，等于绕过平台审核那道闸门——
+派单那头会真的把单派给他（T-13 审查发现的绕过路径）。
 """
 from __future__ import annotations
 
@@ -50,6 +55,7 @@ from app.models.user import User
 from app.services.errors import (
     DispatchForbiddenError,
     MasterNotFoundError,
+    MasterPendingNotSettableError,
     MasterStatusNotSettableError,
 )
 from app.services.provider_scope import (
@@ -67,6 +73,9 @@ AUDIT_REASON = "服务商调整师傅状态"
 
 # 允许被设置的师傅状态（事实来源：app.models.enums.SettableMasterStatus）
 _SETTABLE_STATUS_VALUES = frozenset(s.value for s in SettableMasterStatus)
+
+# 「待审核的师傅不能由服务商改状态」的文案
+_PENDING_MASTER_DETAIL = "待审核的师傅由平台审核流转，服务商不能改他的状态"
 
 
 @dataclass(frozen=True)
@@ -131,6 +140,15 @@ async def update_master_status(
             raise MasterNotFoundError(
                 MASTER_NOT_FOUND_DETAIL.format(master_id=master_id)
             )
+        if old_status is MasterStatus.PENDING:
+            # 待审核的师傅不能由服务商改状态。
+            #
+            # PENDING 是**入驻流程**的状态，只能由平台审核流转
+            # （见 app.services.master_onboarding.review_onboarding）：
+            # 服务商提前把他置成 ACTIVE，等于绕过平台审核那道闸门；
+            # 置成 DISABLED / ON_LEAVE 也不对——这位师傅还没入职，
+            # 服务商根本不该动他的入职状态。
+            raise MasterPendingNotSettableError(_PENDING_MASTER_DETAIL)
 
         # 2) 条件 UPDATE：**归属的闸门只有这一条**。
         #

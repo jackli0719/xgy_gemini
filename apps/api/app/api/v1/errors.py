@@ -42,6 +42,7 @@ from app.services.errors import (
     MasterOnboardingInvariantError,
     MasterOnboardingNotFoundError,
     MasterOrderStatusNotAllowedError,
+    MasterPendingNotSettableError,
     MasterQueryError,
     MasterQueryForbiddenError,
     MasterStatusNotSettableError,
@@ -125,6 +126,10 @@ EXCEPTION_STATUS_MAP: dict[type[Exception], int] = {
     # 师傅状态管理：请求的状态不允许被设置（PENDING 等）
     # 属于「客户端改请求内容才可能解决」-> 400
     MasterStatusNotSettableError: 400,
+    # 师傅状态管理：待审核（PENDING）的师傅只能由平台审核流转，
+    # 服务商改不动他（提前放行等于绕过平台审核那道闸门）
+    # 「等平台审完再来」是可行的应对 -> 409
+    MasterPendingNotSettableError: 409,
     # 师傅接单/拒单：账号没有师傅身份，或身份与服务商归属不一致
     MasterActionForbiddenError: 403,
     # 师傅接单/拒单：内部一致性被打破（服务端 bug，不是客户端的问题）

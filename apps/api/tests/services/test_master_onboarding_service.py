@@ -667,6 +667,65 @@ async def test_review_reject_deletes_row_and_restores_role(maker, db) -> None:
 
 
 @pytest.mark.integration
+async def test_review_requires_platform_admin(maker, db) -> None:
+    """审核只有平台管理员能做（service 层也挡一道）。
+
+    依赖层已经挡住了 HTTP 这条路，这里守的是「service 可能被别处
+    直接调用」那条路——角色放错，审计里的 operator_type 就会谎报操作人。
+    """
+    seeded = await _seed(maker)
+
+    for role, provider_id in (
+        (UserRole.USER, None),
+        (UserRole.PROVIDER_ADMIN, seeded["provider_active"]),
+    ):
+        current = CurrentUser(
+            user_id=seeded["plain_user"], role=role, provider_id=provider_id
+        )
+        async with maker() as session:
+            with pytest.raises(MasterOnboardingForbiddenError):
+                await master_onboarding.review_onboarding(
+                    session,
+                    current_user=current,
+                    master_id=seeded["pending_master"],
+                    decision="APPROVE",
+                )
+
+
+@pytest.mark.integration
+async def test_review_reassignment_writes_provider_audit(maker, db) -> None:
+    """改判归属要单独留一条审计：原来挂在哪家、被谁改判，查得到。"""
+    seeded = await _seed(maker)
+    platform = _current(seeded["platform_admin"], UserRole.PLATFORM_ADMIN)
+
+    async with maker() as session:
+        await master_onboarding.review_onboarding(
+            session,
+            current_user=platform,
+            master_id=seeded["pending_master"],
+            decision="APPROVE",
+            target_provider_id=seeded["provider_active_b"],
+        )
+
+    async with maker() as session:
+        logs = (
+            await session.execute(
+                select(AuditLog).where(
+                    AuditLog.target_type == "master",
+                    AuditLog.target_id == seeded["pending_master"],
+                )
+            )
+        ).scalars().all()
+
+    by_field = {log.field_name: log for log in logs}
+    assert set(by_field) == {"status", "provider_id"}
+    reassign = by_field["provider_id"]
+    assert reassign.old_value == str(seeded["provider_active"])
+    assert reassign.new_value == str(seeded["provider_active_b"])
+    assert reassign.operator_type is OperatorType.PLATFORM_ADMIN
+
+
+@pytest.mark.integration
 async def test_review_unknown_application_is_404(maker, db) -> None:
     """审核不存在的申请 -> 404。"""
     seeded = await _seed(maker)

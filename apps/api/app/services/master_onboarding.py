@@ -36,9 +36,15 @@
 3. **审核走条件 UPDATE，禁止读-改-写**：
    ``WHERE id = ? AND status = 'PENDING'``。两个平台管理员同时审同一份申请，
    只有一个能成功，另一个拿到 404（同构：申请不存在 / 不在待审核状态）。
+   **审核只有平台管理员能做**：依赖层（``require_platform_admin``）之外，
+   service 层也挡一道（``_require_platform_admin``）——审核是最重的写操作，
+   而审计日志里的 operator_type 记的是「平台管理员」，角色放错审计就撒谎。
 4. **留痕**（R3）：登记与审核各写一条 audit_log（target_type='master'、
    field_name='status'、old / new 值、操作人、原因）。
    「谁批的、批给了谁、什么时候」查得到。
+   **改判归属另记一条**（field_name='provider_id'）：那条 status 审计的
+   provider_id 列填的是改判**之后**的服务商，不单独记一条的话，
+   「他原来挂在哪家、被谁改判」就查不到了。
 5. **一致性校验**：master 表与 user 表必须对得上——每个 master 行对应一个
    ``role=MASTER`` 且 ``provider_id IS NULL`` 的账号（数据库 CHECK 约束
    ``ck_user_role_provider`` 强制后半句），反过来每个 ``MASTER`` 账号
@@ -466,6 +472,7 @@ async def review_onboarding(
 
     要求传入的 session 没有活动事务——本函数会自行管理事务生命周期。
     """
+    _require_platform_admin(current_user)
     resolved = _resolve_decision(decision)
 
     async with session.begin():
@@ -518,6 +525,24 @@ async def review_onboarding(
                     reason=reason or APPROVE_AUDIT_REASON,
                 )
             )
+            if provider.id != row.provider_id:
+                # 改判归属也要留痕：master.provider_id 决定这位师傅归谁、
+                # 他的订单佣金算给谁。上面那条 audit_log 的 provider_id 列
+                # 填的是**改判之后**的服务商，不单独记一条的话，
+                # 「他原来挂在哪家、被谁改判」就查不到了（旧服务商那边查不到）。
+                session.add(
+                    AuditLog(
+                        operator_type=OperatorType.PLATFORM_ADMIN,
+                        operator_id=current_user.user_id,
+                        target_type=AUDIT_TARGET_TYPE,
+                        target_id=master_id,
+                        provider_id=provider.id,
+                        field_name="provider_id",
+                        old_value=str(row.provider_id),
+                        new_value=str(provider.id),
+                        reason=reason or APPROVE_AUDIT_REASON,
+                    )
+                )
             await session.flush()
 
             await _assert_identity_consistent(
@@ -742,6 +767,24 @@ async def _assert_identity_consistent(
                 master_id, user_id
             )
         )
+
+
+def _require_platform_admin(current_user: CurrentUser) -> None:
+    """兜底：确认操作人真的是平台管理员。
+
+    依赖层（``require_platform_admin``）已经保证这一点，这里再挡一道
+    是为了「不变量不只在一个地方保证」——万一哪天依赖被换掉，
+    这里会立刻拒，而不是把审核权放给不该有它的人
+    （与 app.services.platform_provider._require_platform_admin、
+    app.services.settle._require_finance_role 同一套写法）。
+
+    **为什么这道门重要**：审核是这条链路上最重的写操作（把师傅置成
+    已入职、改判他的归属、驳回时删行并回退账号角色），
+    而审计日志里的 operator_type 记的是「平台管理员」。
+    角色一旦放错，审计就会谎报操作人身份，R3 的追溯当场失效。
+    """
+    if current_user.role is not UserRole.PLATFORM_ADMIN:
+        raise MasterOnboardingForbiddenError("当前角色不能审核入驻申请")
 
 
 def _resolve_decision(decision: OnboardingDecision | str) -> OnboardingDecision:
