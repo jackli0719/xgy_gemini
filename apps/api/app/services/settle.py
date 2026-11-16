@@ -291,6 +291,8 @@ async def confirm_settlement(
 
     1. **角色守卫**：只有 PLATFORM_FINANCE 能确认，且在碰库之前就挡住。
        角色不对的账号连结算单存在与否都不该知道。
+       （路由层已经有一道 ``require_platform_finance``，
+       这里这道是纵深防御——service 可能被别处直接调用。）
     2. **条件 UPDATE**（``WHERE id=? AND status='PENDING'``）：
        判定交给数据库的行锁裁决。两个财务同时确认同一张单，
        只有一方能确认，另一方 404——不会重复确认、不会重复打款。
@@ -426,6 +428,11 @@ def _require_finance_role(current: CurrentUser) -> None:
     """确认结算是平台财务的动作，角色不对直接拒。
 
     失败在碰数据库之前发生，所以不会泄露任何结算单信息。
+
+    **这是纵深防御，不是唯一一道门**：路由层已经用
+    ``require_platform_finance`` 挡住了（见 app.api.v1.settlements），
+    走 HTTP 的请求根本到不了这里。留这一道是因为 service 可能被
+    别处直接调用（定时任务、内部脚本），不该依赖路由层替它把关。
     """
     if current.role is not UserRole.PLATFORM_FINANCE:
         raise SettlementForbiddenError("当前角色不能确认结算单")

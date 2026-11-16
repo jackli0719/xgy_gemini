@@ -212,6 +212,10 @@ export interface paths {
          * @description 确认一张待结算的结算单，关联订单一并转为「已结算」。
          *
          *     角色不对返回 403；结算单不存在或已被确认返回 404（两种情况同构）。
+         *
+         *     **只有平台财务能确认**（``require_platform_finance``）：
+         *     路由层就在碰库之前把别的角色挡掉（管理员能看结算单列表，
+         *     但看得到不等于确认得了）。
          */
         post: operations["confirm_settlement_api_v1_settlements__settlement_id__confirm_post"];
         delete?: never;

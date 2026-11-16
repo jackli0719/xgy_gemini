@@ -68,7 +68,7 @@ app.include_router(platform_router)
 app.include_router(platform_orders_router)
 # 平台侧目录管理（品类树 / 服务项 / 改价）
 app.include_router(platform_catalog_router)
-# 平台侧结算单列表（只有平台财务能看）
+# 平台侧结算单列表（平台财务与平台管理员都能看；只有确认结算限财务）
 app.include_router(platform_settlements_router)
 # 登录是唯一不需要 token 的业务接口（它本身就是拿 token 的入口）
 app.include_router(auth_router)

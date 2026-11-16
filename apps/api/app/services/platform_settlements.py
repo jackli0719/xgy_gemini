@@ -16,6 +16,8 @@
    「只能看自己家」这种约束。
 4. **分页有上限**：limit 收敛到 [1, MAX_PAGE_LIMIT]（上限 100），
    与用户侧 / 服务商侧 / 平台订单列表同一套口径。
+   **收敛只在接口层做一次**（接口层要回显生效的 page / limit）；
+   服务层只断言进来的是收敛过的值（见 ``_assert_pagination``）。
 
 **金额口径**与服务商侧完全一致（见 app/models/settlement.py）：
 ``total_amount``（客户实付合计）= ``commission_amount``（平台佣金）
@@ -91,9 +93,13 @@ async def list_platform_settlements(
     """返回平台侧可见的结算单（一页 + 总数）。
 
     ``status`` / ``provider_id`` 传 None 表示不按它过滤（平台侧看全量）。
+
+    **``page`` / ``limit`` 进来时必须已经收敛过**（见 ``_assert_pagination``）：
+    收敛只在接口层做一次，接口层要回显生效的 page / limit，
+    服务层再夹一遍的话，两边哪天口径不一致，
+    就会出现「回显 limit=100、实际却取回 500 条」这种自相矛盾的响应。
     """
-    page = max(page, 1)
-    limit = min(max(limit, 1), MAX_PAGE_LIMIT)
+    _assert_pagination(page, limit)
 
     conditions = []
     if status is not None:
@@ -154,3 +160,25 @@ async def list_settlement_providers(
         PlatformSettlementProviderOption(id=provider_id, name=name)
         for provider_id, name in rows
     ]
+
+
+def _assert_pagination(page: int, limit: int) -> None:
+    """断言分页参数**已经收敛过**。
+
+    收敛（把越界的值夹回合法区间）只在接口层做一次
+    （见 app.api.v1.platform_settlements）：接口层要回显生效的
+    page / limit，服务层再夹一遍的话，两边哪天口径不一致，
+    就会出现「回显 limit=100、实际却取回 500 条」这种自相矛盾的响应。
+
+    所以服务层只做**断言**，不重复收敛：进来的是越界值，
+    说明调用方没走接口层——这是编程错误，直接抛出来，
+    而不是悄悄夹一下、让调用方以为自己要的 limit 生效了。
+
+    断言在碰库之前做（函数体第一件事），所以越界调用连一次 SQL 都不会发。
+    """
+    if page < 1:
+        raise ValueError("page 必须是 >= 1 的整数，收到 {}".format(page))
+    if not 1 <= limit <= MAX_PAGE_LIMIT:
+        raise ValueError(
+            "limit 必须在 [1, {}] 之间，收到 {}".format(MAX_PAGE_LIMIT, limit)
+        )

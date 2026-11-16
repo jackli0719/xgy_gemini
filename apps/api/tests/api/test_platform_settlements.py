@@ -10,6 +10,9 @@
 3. **不返回内部字段**：确认人 id、创建 / 更新时间戳都不在响应里。
 4. **确认仍限财务**（配套的写接口）：PLATFORM_FINANCE -> 200，
    PLATFORM_ADMIN -> 403。看得到列表不等于能确认。
+   403 来自**路由层**（文案是通用的 "Forbidden"），service 没被调用。
+5. **分页收敛只有一处**：收敛在接口层做，service 只断言
+   （收到越界的 page / limit 直接抛错，不悄悄夹一下）。
 
 集成测试用的数据库是 TEST_DATABASE_URL 指向的独立测试库
 （集成 fixture 每次 drop_all + create_all，绝不碰开发库）。
@@ -33,6 +36,7 @@ from app.models.enums import SettlementStatus, UserRole
 from app.models.provider import ServiceProvider
 from app.models.settlement import Settlement
 from app.models.user import User
+from app.services import platform_settlements
 
 SETTLEMENTS_URL = "/api/v1/platform/settlements"
 
@@ -496,6 +500,37 @@ async def test_list_settlements_rejects_non_positive_provider_id(api_client, see
 
 
 # =====================================================================
+# 分页收敛只有一处：接口层收敛，service 只断言
+# =====================================================================
+
+
+async def test_service_rejects_unnormalized_pagination() -> None:
+    """service 不再自己收敛分页：越界的值直接抛错。
+
+    **收敛只在接口层做一次**（接口层要回显生效的 page / limit，
+    那边也是回显与实际取回行数必须一致的地方）。
+    service 收到越界值，说明调用方没走接口层——这是编程错误，
+    悄悄夹一下会让调用方以为自己要的 limit 生效了。
+
+    断言在碰库之前（函数体第一件事），所以越界调用连一次 SQL 都不发
+    —— 这里传 None 当 session 都不会炸，正说明它压根没用到库。
+    """
+    with pytest.raises(ValueError):
+        await platform_settlements.list_platform_settlements(
+            None,  # type: ignore[arg-type]
+            page=1,
+            limit=platform_settlements.MAX_PAGE_LIMIT + 1,
+        )
+
+    with pytest.raises(ValueError):
+        await platform_settlements.list_platform_settlements(
+            None,  # type: ignore[arg-type]
+            page=0,
+            limit=platform_settlements.DEFAULT_PAGE_LIMIT,
+        )
+
+
+# =====================================================================
 # 配套的「确认」接口：看得到 ≠ 确认得了
 # =====================================================================
 
@@ -535,12 +570,17 @@ async def test_confirm_settlement_rejects_platform_admin(api_client, db, seeded)
 
     确认结算是把钱定下来的动作，只归财务。管理员看得见列表是为了对账，
     不是为了替财务点确认。
+
+    403 来自**路由层**（``require_platform_finance``）：文案是通用的
+    ``"Forbidden"``——service 层抛的 403 文案是「当前角色不能确认结算单」，
+    两者不一样，靠文案就能分辨请求死在哪一层。
     """
     headers = _auth_header(seeded["platform_admin"], UserRole.PLATFORM_ADMIN, None)
     response = await api_client.post(
         _confirm_url(seeded["settlement_a_pending"]), headers=headers
     )
     assert response.status_code == 403
+    assert response.json() == {"detail": "Forbidden"}
 
     # 数据一点没动
     settlement = await _settlement_of(db, seeded["settlement_a_pending"])

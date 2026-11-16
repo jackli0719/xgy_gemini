@@ -83,7 +83,7 @@ services:
       REQUIRE_INTEGRATION: "1"
       # 集成测试数量下限，少于这个数说明测试没被收集到，直接判失败
       # 新增集成测试后同步更新这个值（跑全量时会提示当前实际数量）
-      EXPECTED_INTEGRATION_TESTS: "299"
+      EXPECTED_INTEGRATION_TESTS: "300"
       # JWT 验签配置：鉴权依赖（app/core/auth.py）读这三个。
       # 容器里读不到仓库根的 .env（app/core/config.py 的 env_file 在容器内指向
       # 不存在的路径），所以必须显式传进来。JWT_SECRET 缺失直接报错，

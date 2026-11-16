@@ -63,9 +63,10 @@ async def list_platform_settlements(
     current_user: CurrentUser = Depends(require_platform_settlement_viewer),
 ) -> PlatformSettlementListResponse:
     """列出平台侧可见的全部结算单（财务与管理员）。"""
-    # 分页参数**在这里收敛一次**，然后把收敛后的值传给 service。
-    # 收敛做两遍（接口层 + service 层）的话，两边哪天不一致，
+    # 分页参数**在这里收敛一次**（全仓库唯一的收敛点），然后把收敛后的值
+    # 传给 service。收敛做两遍（接口层 + service 层）的话，两边哪天不一致，
     # 就会出现「回显 limit=100、实际却取回 500 条」这种自相矛盾的响应。
+    # service 那边只做断言（收到越界值就抛错），不重复收敛。
     effective_page = max(page, 1)
     effective_limit = min(max(limit, 1), platform_settlements.MAX_PAGE_LIMIT)
 

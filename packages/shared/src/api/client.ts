@@ -509,7 +509,8 @@ export function createApiClient(options: ApiClientOptions = {}) {
     /**
      * 平台结算单列表（可按状态 / 服务商筛选）。
      *
-     * 只有平台财务能调（服务端按 token 里的角色判，其他角色一律 403）。
+     * 平台财务与平台管理员都能调（服务端按 token 里的角色判，其他角色一律 403）。
+     * 注意：能**看**列表不等于能**确认**结算——确认接口只放平台财务。
      * `status` / `provider_id` 省略表示不按它筛选。
      */
     listPlatformSettlements(
