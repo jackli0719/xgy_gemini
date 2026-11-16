@@ -12,13 +12,17 @@
    与「这个资源不存在」抛同一个异常、同一句话。调用方没法靠报错差异
    探测别家有没有这个人（与派单是同一套语义、同一句文案，见
    app.services.provider_scope）。
-3. **归属的闸门只有一条：那条条件 UPDATE**。
-   ``WHERE id = ? AND provider_id = ?``——别家的师傅 UPDATE 命中 0 行，
-   于是 404。**不先查出来再判断**：那样会把归属校验拆成两处（查询一处、
-   UPDATE 一处），少写一处就是「改到别家的人」；而且 UPDATE 里的归属条件
-   会变成摆设——去掉它也没人看得出来。
-   查询旧状态（审计要用）因此**不按归属过滤**：它只是取一个旧值，
-   改不改得动由 UPDATE 说了算。
+3. **归属判定：读旧状态时也按归属过滤，条件 UPDATE 里再带一次**。
+   读那一步的谓词是 ``WHERE id = ? AND provider_id = ?``——别家的师傅
+   （或者压根不存在的 id）读不到，于是 404，两种情况同构。
+   UPDATE 那一步再带一次归属：读到的只是快照，等锁期间这一行可能已被
+   别人改走，谓词不成立就一条也没改到（rowcount == 0 -> 404）。
+   **为什么不能只靠 UPDATE 那一道**：本模块还要判断「这个师傅是不是
+   正在待审核」（待审核的师傅不许服务商改状态，见下），
+   而入驻登记之后 PENDING 的师傅是**全平台存在**的（申请人自选服务商）。
+   若旧状态读取不按归属过滤，别家待审核的师傅会在这里被认出并返回 409，
+   别家已入职的师傅却返回 404——两种响应可区分，就成了跨租户的状态
+   oracle（R1）。所以归属先判定完，再谈状态。
 4. **状态变更必须留痕**：同事务内写一条 audit_log
    （target_type='master'、field_name='status'、old / new 值、操作人）。
    谁能改师傅状态、把它从什么状态改成什么状态，必须查得到（R3）。
@@ -122,21 +126,34 @@ async def update_master_status(
     new_status = _resolve_settable_status(status)
 
     async with session.begin():
-        # 1) 旧状态（审计日志要记 old_value）。
+        # 1) 旧状态（审计日志要记 old_value）+ **归属判定**。
         #
-        # 这一步**不按归属过滤**：它只负责取一个旧值，
-        # 「这个师傅能不能改」由下面那条条件 UPDATE 说了算。
+        # 这一步**按归属过滤**：``Master.id = ? AND Master.provider_id = ?``。
+        # 读不到 -> 这个师傅不在本商名下（或者压根不存在）-> 404，
+        # 两种情况共用同一句话，调用方没法靠报错差异探测别家有没有这个人
+        # （R1）。
+        #
+        # **为什么归属判定要在这里也做一遍**（下面那条条件 UPDATE 里还有一遍）：
+        # 「待审核（PENDING）的师傅不许改」这条规则需要知道
+        # 「这个师傅在本商名下、而且正在待审核」。如果这一步不按归属过滤，
+        # 别家（甚至别平台）的待审核师傅会在这里被识别出来并返回 409，
+        # 而别家已入职的师傅走到下面那条 UPDATE 才返回 404——
+        # 两种响应可区分，就成了跨租户的存在性 / 状态 oracle。
+        # 所以归属判定先做完，再谈状态。
         #
         # 并发下这个旧值可能稍旧（两个管理员同时改一个师傅时，
         # 两条审计都记同一个旧值）。真正生效的状态以 UPDATE 为准，
         # 审计里 old/new 的用途是「看得出改了什么」，不是精确到并发的流水。
         old_status = (
             await session.execute(
-                select(Master.status).where(Master.id == master_id)
+                select(Master.status).where(
+                    Master.id == master_id,
+                    Master.provider_id == provider_id,
+                )
             )
         ).scalar_one_or_none()
         if old_status is None:
-            # 这个 id 上根本没有师傅
+            # 不在本商名下，或者这个 id 上根本没有师傅：两种情况同构
             raise MasterNotFoundError(
                 MASTER_NOT_FOUND_DETAIL.format(master_id=master_id)
             )
@@ -148,11 +165,16 @@ async def update_master_status(
             # 服务商提前把他置成 ACTIVE，等于绕过平台审核那道闸门；
             # 置成 DISABLED / ON_LEAVE 也不对——这位师傅还没入职，
             # 服务商根本不该动他的入职状态。
+            #
+            # 到这一步说明归属已经成立（本商的师傅），所以回 409
+            # 不会泄露别家的信息。
             raise MasterPendingNotSettableError(_PENDING_MASTER_DETAIL)
 
-        # 2) 条件 UPDATE：**归属的闸门只有这一条**。
+        # 2) 条件 UPDATE：**并发裁决的闸门**。
         #
-        # 别家的师傅：谓词不成立，一条也没改到 -> rowcount == 0 -> 404。
+        # 谓词里再带一次归属：上面那步的读只是快照，等锁期间
+        # 这一行可能已被别人改走（甚至被划到别家名下）。
+        # 谓词不成立 -> 一条也没改到 -> rowcount == 0 -> 404。
         # 与派单同一套思路——把判定交给数据库，不靠读-改-写。
         result = await session.execute(
             update(Master)

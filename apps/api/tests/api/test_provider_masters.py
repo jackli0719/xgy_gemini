@@ -153,7 +153,24 @@ async def _seed(db) -> dict[str, int]:
             status=MasterStatus.ACTIVE,
             rating=Decimal("4.0"),
         )
-        session.add_all([master_a1, master_a2, master_b1])
+        # 乙服务商还有一个**待审核**的师傅：入驻登记之后 PENDING 的师傅
+        # 是全平台存在的（申请人自选服务商），所以「别家待审核的师傅」
+        # 必须与「别家已入职的师傅」响应同构（见下面的 404 同构用例）
+        master_user_b2 = User(
+            phone="13800000008",
+            nickname="师傅乙二账号",
+            role=UserRole.MASTER,
+        )
+        session.add(master_user_b2)
+        await session.flush()
+        master_b2 = Master(
+            provider_id=provider_b.id,
+            user_id=master_user_b2.id,
+            real_name="师傅乙二",
+            status=MasterStatus.PENDING,
+            rating=None,
+        )
+        session.add_all([master_a1, master_a2, master_b1, master_b2])
         await session.flush()
         await session.commit()
 
@@ -167,6 +184,7 @@ async def _seed(db) -> dict[str, int]:
             "master_a1": master_a1.id,
             "master_a2": master_a2.id,
             "master_b1": master_b1.id,
+            "master_b2": master_b2.id,
         }
 
 
@@ -349,6 +367,38 @@ async def test_patch_pending_master_status_is_409(api_client, seeded, db) -> Non
     # 状态没变，也没有留下任何「改过」的痕迹
     assert master.status == MasterStatus.PENDING
     assert logs == []
+
+
+@pytest.mark.integration
+async def test_patch_foreign_pending_master_is_404_same_as_missing(
+    api_client, seeded
+) -> None:
+    """别家的**待审核**师傅 -> 404，且与「不存在」逐字同构（R1）。
+
+    入驻登记之后，PENDING 的师傅是全平台存在的（申请人自选服务商），
+    所以「别家待审核的师傅」与「别家已入职的师傅」必须长得一样——
+    否则服务商就能靠报错差异判断别家有没有人在申请入驻。
+    """
+    headers = _admin_a_headers(seeded)
+
+    response = await api_client.patch(
+        "{}/{}".format(MASTERS_URL, seeded["master_b2"]),
+        json={"status": "ACTIVE"},
+        headers=headers,
+    )
+    missing = await api_client.patch(
+        "{}/999999".format(MASTERS_URL),
+        json={"status": "ACTIVE"},
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert missing.status_code == 404
+    # 两句只有客户端自己给的 master_id 不同，归属信息一个字都没有
+    assert response.json()["detail"] == "师傅不存在：master_id={}".format(
+        seeded["master_b2"]
+    )
+    assert missing.json()["detail"] == "师傅不存在：master_id=999999"
 
 
 @pytest.mark.integration
