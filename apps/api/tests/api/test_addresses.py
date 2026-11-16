@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, time, timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
@@ -31,6 +31,7 @@ from app.models.enums import OrderStatus, PayStatus, UserRole
 from app.models.order import Order
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
+from tests.support import business_today
 
 ADDRESSES_URL = "/api/v1/addresses"
 ORDERS_URL = "/api/v1/orders"
@@ -343,7 +344,7 @@ async def _create_order_for_address(
     订单表的 address_id 上是 RESTRICT 外键：地址一旦被订单引用就删不掉。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     async with maker() as session:
         category = ServiceCategory(name="家庭保洁", parent_id=None, sort_order=1)
         session.add(category)

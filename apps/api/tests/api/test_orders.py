@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, time, timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
@@ -82,6 +82,7 @@ from app.services.errors import (
     SlotNotFoundError,
     SlotNotInFutureError,
 )
+from tests.support import business_today
 
 ORDER_URL = "/api/v1/orders"
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -488,8 +489,8 @@ async def seeded(db) -> Seed:
     - 时段 3（item 2，明天）、时段 7（item 5）、时段 8（item 2，昨天）
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
-    yesterday = date.today() - timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
+    yesterday = business_today() - timedelta(days=1)
     async with maker() as session:
         # 模型层没有 relationship，SQLAlchemy 的 flush 顺序按 mapper 类名字母序
         # （不是外键依赖序），所以这里按依赖顺序逐个 flush，避免外键违例

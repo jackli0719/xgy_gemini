@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import inspect
 import os
-from datetime import date, time, timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
@@ -47,6 +47,7 @@ from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
 from app.schemas.master import MasterOrderDetail, MasterOrderItem, MasterProfile
 from app.services.errors import MasterQueryForbiddenError
+from tests.support import business_today
 
 ORDERS_URL = "/api/v1/master/orders"
 PROFILE_URL = "/api/v1/master/profile"
@@ -251,7 +252,7 @@ async def seeded(db):
     （不是外键依赖序），所以这里按依赖顺序逐个 flush，避免外键违例。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
 
     async with maker() as session:
         session.add_all(

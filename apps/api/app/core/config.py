@@ -3,6 +3,7 @@
 根目录 .env 由 `cp .env.example .env` 生成，不入库。
 """
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -65,6 +66,33 @@ class Settings(BaseSettings):
     # （见 app/services/auto_confirm.py）。0 或负数会让「立刻全部确认」，
     # 配置阶段直接拒绝。
     auto_confirm_threshold_hours: int = 24
+
+    # 业务时区：所有「业务日期」都按它算——今天是哪天、下单时段是不是还在
+    # 将来、超时自动确认的 N 小时从哪一刻起算、T+1 结算的「满一天」。
+    #
+    # 默认 Asia/Shanghai：面向国内用户。存库时间戳仍是 UTC（timestamptz），
+    # 只在「取业务日期」的那一处换算（见 app/core/timezone.py）。
+    timezone: str = "Asia/Shanghai"
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, value: str) -> str:
+        """时区名必须是系统认识的，否则拒绝启动。
+
+        时区名写错（比如 "Asia/ShangHai"）如果放到运行时才发现，
+        报出来的是 zoneinfo 的 KeyError，看不出是哪个配置项坏了。
+        所以在配置阶段就拒。
+        """
+        name = (value or "").strip()
+        if not name:
+            raise ValueError("TIMEZONE 不能为空。")
+        try:
+            ZoneInfo(name)
+        except Exception as exc:  # noqa: BLE001 - 任何解析失败都是「不是合法时区名」
+            raise ValueError(
+                "TIMEZONE={} 不是合法的时区名：{}".format(name, exc)
+            )
+        return name
 
     @field_validator("auto_confirm_threshold_hours")
     @classmethod

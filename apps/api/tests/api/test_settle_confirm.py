@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -53,6 +53,7 @@ from app.services.errors import (
 )
 from app.services.settle import confirm_settlement
 from support import Rendezvous
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -268,7 +269,7 @@ async def db():
 async def seeded(db):
     """种一个服务商、一个平台财务账号、两笔「待结算」订单、一张待结算结算单。"""
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     now = datetime.now(timezone.utc)
     async with maker() as session:
         session.add(

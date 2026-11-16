@@ -1,0 +1,42 @@
+{
+  "timeZone": "Asia/Shanghai",
+  "note": "前后端共用的时区契约：同一个时刻（instant，UTC ISO），后端算出来的业务日期 / 业务时间必须和前端显示的完全一样。改这里的期望值之前，先改实现。",
+  "cases": [
+    {
+      "instant": "2026-11-14T23:30:00Z",
+      "businessDate": "2026-11-15",
+      "businessDateTime": "2026-11-15 07:30",
+      "why": "UTC 23:30 = 北京时间次日 07:30：业务日期已经是次天了"
+    },
+    {
+      "instant": "2026-11-15T15:59:59Z",
+      "businessDate": "2026-11-15",
+      "businessDateTime": "2026-11-15 23:59",
+      "why": "离北京时间午夜还有一秒"
+    },
+    {
+      "instant": "2026-11-15T16:00:00Z",
+      "businessDate": "2026-11-16",
+      "businessDateTime": "2026-11-16 00:00",
+      "why": "北京时间午夜整：业务日期翻页"
+    },
+    {
+      "instant": "2026-01-01T00:00:00Z",
+      "businessDate": "2026-01-01",
+      "businessDateTime": "2026-01-01 08:00",
+      "why": "元旦：UTC 年初 = 北京时间同一天早上"
+    },
+    {
+      "instant": "2026-06-30T20:00:00Z",
+      "businessDate": "2026-07-01",
+      "businessDateTime": "2026-07-01 04:00",
+      "why": "UTC 月末 = 北京时间次日"
+    },
+    {
+      "instant": "2026-12-31T16:00:00Z",
+      "businessDate": "2027-01-01",
+      "businessDateTime": "2027-01-01 00:00",
+      "why": "跨年：UTC 年末 = 北京时间新年"
+    }
+  ]
+}

@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import inspect
 import os
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -42,9 +43,11 @@ from app.services.auto_confirm import (
     AUTO_CONFIRM_REASON,
     SYSTEM_OPERATOR_ID,
     _confirm_one,
+    _resolve_cutoff,
     _resolve_threshold_hours,
     auto_confirm_expired,
 )
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -67,6 +70,12 @@ BASE_PRICE = Decimal("100.00")
 TIMED_OUT_ORDER_NO_1 = "OTO20260401000001"
 TIMED_OUT_ORDER_NO_2 = "OTO20260401000002"
 FRESH_ORDER_NO = "OTO20260401000003"
+
+# 阈值边界用例专用（见 test_threshold_boundary_uses_business_clock）
+JUST_OVER_ORDER_ID = 4  # 超时 1 秒
+JUST_OVER_ORDER_NO = "OTO20260401000004"
+EXACTLY_ON_ORDER_ID = 5  # 正好卡在截止点上
+EXACTLY_ON_ORDER_NO = "OTO20260401000005"
 
 
 # =====================================================================
@@ -173,7 +182,7 @@ async def seeded(db):
     其中两笔的 ``updated_at`` 设在很久以前（超时），一笔是刚刚的（没超时）。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     now = datetime.now(timezone.utc)
     async with maker() as session:
         session.add(
@@ -299,10 +308,38 @@ async def _logs_of(db, order_id: int) -> list[OrderStatusLog]:
         return list(rows)
 
 
-async def _run(db, *, threshold_hours: int | None = None) -> int:
+async def _run(
+    db, *, threshold_hours: int | None = None, now: datetime | None = None
+) -> int:
     maker = _maker(db)
     async with maker() as session:
-        return await auto_confirm_expired(session, threshold_hours=threshold_hours)
+        return await auto_confirm_expired(
+            session, threshold_hours=threshold_hours, now=now
+        )
+
+
+def _pending_confirm_order(
+    order_id: int, order_no: str, updated_at: datetime
+) -> Order:
+    """造一笔「待确认」订单——边界用例单独种一行用。"""
+    now = datetime.now(timezone.utc)
+    return Order(
+        id=order_id,
+        order_no=order_no,
+        user_id=CUSTOMER_USER_ID,
+        provider_id=MY_PROVIDER_ID,
+        master_id=MY_MASTER_ID,
+        address_id=3,
+        item_id=2,
+        slot_id=4,
+        amount=BASE_PRICE,
+        status=OrderStatus.PENDING_CONFIRM,
+        pay_status=PayStatus.PAID,
+        paid_at=now,
+        dispatched_at=now,
+        accepted_at=now,
+        updated_at=updated_at,
+    )
 
 
 # ---------------------------------------------------------------------
@@ -441,3 +478,78 @@ async def test_single_order_failure_does_not_stop_the_batch(
 
     # 失败被记了日志（含订单 id），不是悄悄吞掉
     assert "order_id={}".format(TIMED_OUT_ORDER_ID_1) in caplog.text
+
+
+# ---------------------------------------------------------------------
+# 8. 阈值按业务时区（Asia/Shanghai）算
+# ---------------------------------------------------------------------
+
+
+def test_cutoff_is_measured_from_business_now() -> None:
+    """阈值从**业务时区**的「现在」起算 N 小时。
+
+    Asia/Shanghai 是固定 +08:00（无夏令时），所以「N 小时」这个绝对时长
+    换算到 UTC 是一样的——这条断言钉的是**接口契约**：cutoff 一定带着时区，
+    而且是从业务时钟起算的（而不是从某个裸时间戳起算）。
+    """
+    fixed = datetime(2026, 11, 15, 16, 0, tzinfo=timezone.utc)  # 北京时间 11-16 00:00
+    cutoff = _resolve_cutoff(24, now=fixed)
+
+    assert cutoff == datetime(2026, 11, 14, 16, 0, tzinfo=timezone.utc)
+    # 同一个绝对时刻，用业务时区表示就是北京时间 11-15 00:00
+    assert (
+        cutoff.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M")
+        == "2026-11-15 00:00"
+    )
+    # cutoff 必须带时区：naive 时间跟库里的 timestamptz 比会直接炸
+    assert cutoff.tzinfo is not None
+
+
+def test_cutoff_treats_naive_now_as_utc() -> None:
+    """naive 的「现在」按 UTC 解释（明确约定，不留隐式本地时间）。"""
+    naive = datetime(2026, 11, 15, 16, 0)
+    assert _resolve_cutoff(24, now=naive) == datetime(
+        2026, 11, 14, 16, 0, tzinfo=timezone.utc
+    )
+
+
+@pytest.mark.integration
+async def test_threshold_boundary_uses_business_clock(db, seeded) -> None:
+    """超时判定按业务时钟的 N 小时算：正好卡在截止点上的不算超时。
+
+    固定「现在」= 2026-11-15T16:00Z（北京时间 2026-11-16 00:00），
+    阈值 24 小时 -> 截止点 = 2026-11-14T16:00Z（北京时间 2026-11-15 00:00）。
+
+    - 截止点前 1 秒的单：超时 -> 被自动确认；
+    - 正好卡在截止点上的单：没超时（谓词是严格小于）-> 不动。
+    """
+    fixed_now = datetime(2026, 11, 15, 16, 0, tzinfo=timezone.utc)
+    cutoff = fixed_now - timedelta(hours=24)
+
+    maker = _maker(db)
+    async with maker() as session:
+        session.add_all(
+            [
+                _pending_confirm_order(
+                    JUST_OVER_ORDER_ID,
+                    JUST_OVER_ORDER_NO,
+                    cutoff - timedelta(seconds=1),
+                ),
+                _pending_confirm_order(
+                    EXACTLY_ON_ORDER_ID,
+                    EXACTLY_ON_ORDER_NO,
+                    cutoff,
+                ),
+            ]
+        )
+        await session.commit()
+
+    await _run(db, threshold_hours=24, now=fixed_now)
+
+    over = await _order_of(db, JUST_OVER_ORDER_ID)
+    assert over.status == OrderStatus.COMPLETED
+    assert over.auto_confirmed is True
+
+    exact = await _order_of(db, EXACTLY_ON_ORDER_ID)
+    assert exact.status == OrderStatus.PENDING_CONFIRM
+    assert exact.auto_confirmed is False

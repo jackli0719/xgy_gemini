@@ -24,6 +24,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.timezone import business_date, business_datetime
 from app.models.address import Address
 from app.models.audit_log import AuditLog
 from app.models.base import Base
@@ -51,6 +52,7 @@ from app.services.settle import (
     _split_amounts,
     generate_pending_settlements,
 )
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -72,6 +74,12 @@ MASTER_B_ID = 2
 ORDER_A1_ID = 1  # 服务商 A，100.00，3 天前完工
 ORDER_A2_ID = 2  # 服务商 A，50.00，2 天前完工
 ORDER_B1_ID = 4  # 服务商 B，200.00，2 天前完工
+# 服务商 A，60.00，UTC 16:00 完工（= 北京时间次日 00:00），边界用例专用
+ORDER_C1_ID = 5
+# 服务商 A，60.00，业务日 23:59 完工（= UTC 15:59），边界用例专用
+ORDER_C2_ID = 6
+# 服务商 A，60.00，业务日 00:01 完工（= 前一日 UTC 16:01），边界用例专用
+ORDER_C3_ID = 7
 # 刚完工，没满 T+1，不该进结算
 ORDER_A3_ID = 3  # 服务商 A，80.00，1 小时前完工
 
@@ -79,6 +87,9 @@ ORDER_A1_NO = "OTO20260401000001"
 ORDER_A2_NO = "OTO20260401000002"
 ORDER_A3_NO = "OTO20260401000003"
 ORDER_B1_NO = "OTO20260401000004"
+ORDER_C1_NO = "OTO20260401000005"
+ORDER_C2_NO = "OTO20260401000006"
+ORDER_C3_NO = "OTO20260401000007"
 
 PROVIDER_A_RATE = Decimal("0.2000")
 PROVIDER_B_RATE = Decimal("0.1000")
@@ -198,8 +209,12 @@ async def seeded(db):
     三笔完工满一天（应结算），一笔刚完工（不满 T+1，不结算）。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     now = datetime.now(timezone.utc)
+    # 完工时刻按**业务日期**摆，不按「现在往前推几小时」：
+    # 「1 小时前完工」这种相对时间会在北京时间凌晨跨到前一个业务日，
+    # 用例就会随机红。业务零点往前推 N 天 = N 个业务日之前，确定。
+    business_midnight = business_datetime(business_today(), time.min)
     async with maker() as session:
         session.add_all(
             [
@@ -320,7 +335,7 @@ async def seeded(db):
                     PROVIDER_A_ID,
                     MASTER_A_ID,
                     Decimal("100.00"),
-                    now - timedelta(days=3),
+                    business_midnight - timedelta(days=3),
                 ),
                 _order(
                     ORDER_A2_ID,
@@ -328,7 +343,7 @@ async def seeded(db):
                     PROVIDER_A_ID,
                     MASTER_A_ID,
                     Decimal("50.00"),
-                    now - timedelta(days=2),
+                    business_midnight - timedelta(days=2),
                 ),
                 _order(
                     ORDER_A3_ID,
@@ -336,7 +351,8 @@ async def seeded(db):
                     PROVIDER_A_ID,
                     MASTER_A_ID,
                     Decimal("80.00"),
-                    now - timedelta(hours=1),
+                    # 今天业务日的零点：还在今天，没满 T+1
+                    business_midnight,
                 ),
                 _order(
                     ORDER_B1_ID,
@@ -344,7 +360,7 @@ async def seeded(db):
                     PROVIDER_B_ID,
                     MASTER_B_ID,
                     Decimal("200.00"),
-                    now - timedelta(days=2),
+                    business_midnight - timedelta(days=2),
                 ),
             ]
         )
@@ -438,8 +454,9 @@ async def test_same_provider_orders_become_one_settlement(db, seeded) -> None:
     # 周期覆盖两笔订单的完工日期
     order_a1 = await _order_of(db, ORDER_A1_ID)
     order_a2 = await _order_of(db, ORDER_A2_ID)
-    assert settlement.period_start == order_a1.completed_at.date()
-    assert settlement.period_end == order_a2.completed_at.date()
+    # 周期按**业务日期**算（不是 UTC 日期）
+    assert settlement.period_start == business_date(order_a1.completed_at)
+    assert settlement.period_end == business_date(order_a2.completed_at)
 
     items = await _items_of(db, settlement_id=settlement.id)
     assert sorted(item.order_id for item in items) == [ORDER_A1_ID, ORDER_A2_ID]
@@ -708,3 +725,168 @@ async def test_provider_failure_does_not_stop_others(
     errors = [record for record in caplog.records if record.levelno >= logging.ERROR]
     assert any("provider_id={}".format(PROVIDER_A_ID) in record.getMessage() for record in errors)
 
+
+
+# ---------------------------------------------------------------------
+# 8. T+1 的边界是「业务零点」
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_t_plus_one_boundary_is_business_midnight(db, seeded) -> None:
+    """UTC 16:00 完工的单，次日（+8 小时）才进 PENDING_SETTLE。
+
+    完工时刻 2026-11-14T16:00Z = 北京时间 2026-11-15 00:00（业务日期 11-15）。
+    T+1 的意思是：业务日期 11-16 那天（= 2026-11-15T16:00Z 之后）才进结算。
+
+    边界之前（北京时间 11-15 23:59:59）：还是「已完成」；
+    边界之上（北京时间 11-16 00:00）：转「待结算」。
+    """
+    completed_at = datetime(2026, 11, 14, 16, 0, tzinfo=timezone.utc)
+    maker = _maker(db)
+    async with maker() as session:
+        session.add(
+            Order(
+                id=ORDER_C1_ID,
+                order_no=ORDER_C1_NO,
+                user_id=CUSTOMER_USER_ID,
+                provider_id=PROVIDER_A_ID,
+                master_id=MASTER_A_ID,
+                address_id=3,
+                item_id=2,
+                slot_id=4,
+                amount=Decimal("60.00"),
+                status=OrderStatus.COMPLETED,
+                pay_status=PayStatus.PAID,
+                paid_at=completed_at,
+                dispatched_at=completed_at,
+                accepted_at=completed_at,
+                completed_at=completed_at,
+                updated_at=completed_at,
+            )
+        )
+        await session.commit()
+
+    # 边界之前：北京时间 2026-11-15 23:59:59
+    await _run(db, now=datetime(2026, 11, 15, 15, 59, 59, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C1_ID)
+    assert order.status == OrderStatus.COMPLETED
+
+    # 边界之上：北京时间 2026-11-16 00:00（= 2026-11-15T16:00Z）
+    await _run(db, now=datetime(2026, 11, 15, 16, 0, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C1_ID)
+    assert order.status == OrderStatus.PENDING_SETTLE
+
+    # 结算周期按业务日期算：这一单的业务日期是 2026-11-15
+    # （周期终点取的是这一批里最晚的业务日期，与 UTC 日期无关）
+    items = await _items_of(db)
+    c1_items = [item for item in items if item.order_id == ORDER_C1_ID]
+    assert len(c1_items) == 1
+    c1_settlement = next(
+        s
+        for s in await _settlements_of(db)
+        if s.id == c1_items[0].settlement_id
+    )
+    assert c1_settlement.period_end == date(2026, 11, 15)
+
+
+# ---------------------------------------------------------------------
+# 9. 完工时刻在业务日的哪个位置：都按「次日业务零点」转
+# ---------------------------------------------------------------------
+
+
+async def _add_completed_order(
+    db,
+    *,
+    order_id: int,
+    order_no: str,
+    completed_at: datetime,
+) -> None:
+    """种一笔「已完成」的订单（服务商甲），完工时刻由调用方指定。"""
+    maker = _maker(db)
+    async with maker() as session:
+        session.add(
+            Order(
+                id=order_id,
+                order_no=order_no,
+                user_id=CUSTOMER_USER_ID,
+                provider_id=PROVIDER_A_ID,
+                master_id=MASTER_A_ID,
+                address_id=3,
+                item_id=2,
+                slot_id=4,
+                amount=Decimal("60.00"),
+                status=OrderStatus.COMPLETED,
+                pay_status=PayStatus.PAID,
+                paid_at=completed_at,
+                dispatched_at=completed_at,
+                accepted_at=completed_at,
+                completed_at=completed_at,
+                updated_at=completed_at,
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.integration
+async def test_completed_at_business_2359_settles_at_next_business_midnight(
+    db, seeded
+) -> None:
+    """业务日 23:59 完工的单，**次日业务零点**就该进 PENDING_SETTLE。
+
+    这一条盯的是「T+1 = 业务零点」而不是「满 24 小时」：离完工才 1 分钟，
+    下一个业务零点一到就进结算。按「满 24 小时」要等到次日 23:59。
+
+    时刻换算（北京时间 = UTC + 8）：
+    - 完工 2026-11-14 23:59 = 2026-11-14T15:59Z；
+    - 次日业务零点 2026-11-15 00:00 = 2026-11-14T16:00Z。
+    """
+    await _add_completed_order(
+        db,
+        order_id=ORDER_C2_ID,
+        order_no=ORDER_C2_NO,
+        completed_at=datetime(2026, 11, 14, 15, 59, tzinfo=timezone.utc),
+    )
+
+    # 次日业务零点之前（北京时间 11-14 23:59:59）：还是「已完成」
+    await _run(db, now=datetime(2026, 11, 14, 15, 59, 59, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C2_ID)
+    assert order.status == OrderStatus.COMPLETED
+
+    # 次日业务零点一到（北京时间 11-15 00:00）：转「待结算」
+    await _run(db, now=datetime(2026, 11, 14, 16, 0, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C2_ID)
+    assert order.status == OrderStatus.PENDING_SETTLE
+
+
+@pytest.mark.integration
+async def test_completed_at_business_0001_settles_only_next_business_midnight(
+    db, seeded
+) -> None:
+    """业务日 00:01 完工的单，**当日业务零点**不动它，次日零点才转。
+
+    刚过零点就完工的单最容易算错：它离「当日零点」只有 1 分钟，
+    但 T+1 的「天」是**业务日**——当日零点时它才刚完工（还没满一天），
+    要到次日零点才进结算。
+
+    时刻换算（北京时间 = UTC + 8）：
+    - 完工 2026-11-14 00:01 = 2026-11-13T16:01Z；
+    - 当日业务零点 2026-11-14 00:00 = 2026-11-13T16:00Z；
+    - 次日业务零点 2026-11-15 00:00 = 2026-11-14T16:00Z。
+    """
+    await _add_completed_order(
+        db,
+        order_id=ORDER_C3_ID,
+        order_no=ORDER_C3_NO,
+        completed_at=datetime(2026, 11, 13, 16, 1, tzinfo=timezone.utc),
+    )
+
+    # 当日业务零点（北京时间 11-14 00:00）：这一单 00:01 才完工，还不动它
+    await _run(db, now=datetime(2026, 11, 13, 16, 0, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C3_ID)
+    assert order.status == OrderStatus.COMPLETED
+
+    # 次日业务零点（北京时间 11-15 00:00）：才转「待结算」
+    await _run(db, now=datetime(2026, 11, 14, 16, 0, tzinfo=timezone.utc))
+    order = await _order_of(db, ORDER_C3_ID)
+    assert order.status == OrderStatus.PENDING_SETTLE

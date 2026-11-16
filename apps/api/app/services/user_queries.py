@@ -17,12 +17,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.timezone import today as business_today
 from app.domain.slot_rule import available as remaining_of
 from app.models.catalog import ServiceCategory, ServiceItem
 from app.models.enums import CatalogStatus, OrderStatus, PayStatus
@@ -125,14 +126,14 @@ class OrderRow:
 def today() -> date:
     """应用口径下的「今天」。
 
-    按应用统一使用的 UTC 计算（见 app.services.place_order 里
-    拿 ``datetime.now(timezone.utc)`` 判断时段是否在将来）。
+    按**业务时区**算（默认 Asia/Shanghai，见 ``app.core.timezone``）：
+    面向国内用户，「今天」是国内的那个白天。
 
-    技术债：面向国内用户时，「今天」应该按 Asia/Shanghai 算，
-    否则 UTC 凌晨（中国时间早上）查当天时段会差一天。
-    这需要一张单独的卡片加时区配置，本次不夹带。
+    之前这里算的是 UTC 日期——UTC 23:30（国内次日 07:30）下单时，
+    UTC 日期还停在昨天，于是「今天」比用户以为的早一天，
+    查当天时段、过滤订单都会差一天。
     """
-    return datetime.now(timezone.utc).date()
+    return business_today()
 
 
 async def list_categories(session: AsyncSession) -> list[CategoryRow]:

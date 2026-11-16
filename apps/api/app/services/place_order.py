@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.timezone import business_datetime, now
 from app.domain.order_no import generate_order_no
 from app.domain.pricing import snapshot_amount
 from app.domain.slot_rule import assert_reservable
@@ -198,8 +198,12 @@ async def _validate_place_order(
         raise SlotItemMismatchError(
             "时段不属于该服务项：slot_id={}, item_id={}".format(slot_id, item_id)
         )
-    slot_start_at = datetime.combine(slot_date, slot_start, tzinfo=timezone.utc)
-    if slot_start_at <= datetime.now(timezone.utc):
+    # 时段说的是「北京时间的几点几分」（墙钟），不是「UTC 的几点几分」。
+    # 所以把它组装成业务时区的时间点，再和业务时区的「现在」比：
+    # 之前按 UTC 组装，等于把 09:00 的上门时段当成了 UTC 09:00，
+    # 比实际早了 8 小时，线上会误判「时段已过」。
+    slot_start_at = business_datetime(slot_date, slot_start)
+    if slot_start_at <= now():
         raise SlotNotInFutureError(
             "时段不在将来：slot_id={}".format(slot_id)
         )

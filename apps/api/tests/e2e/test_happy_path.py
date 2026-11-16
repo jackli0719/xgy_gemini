@@ -24,7 +24,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
@@ -49,6 +49,7 @@ from app.models.order import Order, OrderStatusLog
 from app.models.provider import Master, ServiceProvider
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -131,7 +132,7 @@ async def seeded(db) -> dict[str, int]:
     （app/services/login.py），这正是要验的那条路径。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     async with maker() as session:
         provider = ServiceProvider(
             name=PROVIDER_NAME,
@@ -269,7 +270,7 @@ def _find_category(nodes: list[dict], name: str) -> dict:
 @pytest.mark.integration
 async def test_four_role_happy_path(api_client, seeded, db) -> None:
     """四端闭环：客户下单 -> 支付 -> 派单 -> 接单 -> 开工 -> 完工 -> 确认完成。"""
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
 
     # ---------------------------------------------------------------
     # 步骤 1：客户登录

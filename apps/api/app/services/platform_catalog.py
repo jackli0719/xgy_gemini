@@ -46,7 +46,7 @@ updated_at 本来就在（TimestampMixin），每次写都刷新，不用迁移�
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
@@ -54,6 +54,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
+from app.core.timezone import as_utc
 from app.models.audit_log import AuditLog
 from app.models.catalog import ServiceCategory, ServiceItem
 from app.models.enums import CatalogStatus, OperatorType, UserRole
@@ -719,9 +720,11 @@ def _version_token(value: datetime) -> datetime:
 
     没有时区的按 UTC 处理：数据库里存的是带时区的值，
     一个裸时间戳被当成别的时区会平白差出几个小时。
+
+    带时区的一律统一成 UTC（绝对时刻）：版本号比的是时刻，
+    不是墙上时间，两边的时区写法不应该影响结果。
     """
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+    value = as_utc(value)
     return value.replace(microsecond=(value.microsecond // 1000) * 1000)
 
 

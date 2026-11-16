@@ -16,11 +16,10 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.timezone import now_utc
 from app.domain.order_state import assert_transition
 from app.models.enums import OperatorType, OrderStatus, PayStatus
 from app.models.order import Order, OrderStatusLog
@@ -102,7 +101,7 @@ async def mock_pay_success(session: AsyncSession, *, order_no: str) -> Order:
 
         order.status = OrderStatus.PENDING_DISPATCH
         order.pay_status = PayStatus.PAID
-        order.paid_at = datetime.now(timezone.utc)
+        order.paid_at = now_utc()
 
         # 状态变更必须留痕（R4）。系统操作：operator_type=SYSTEM，operator_id=0
         session.add(

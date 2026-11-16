@@ -35,6 +35,7 @@ tests/                 vitest 测试
    - token 从 `localStorage` 的 `oto.token` 读，没有就跳「请先登录」；
    - 地址是**占位数据**（`src/constants/addresses.ts`），后端目前没有地址接口。
 4. **样式用 Vant 默认**：不写自定义主题。Vant 组件由 `unplugin-vue-components` + `VantResolver` 自动按需引入（含样式），生成的类型声明在 `src/components.d.ts`（进版本库）。
+5. **日期按业务时区（Asia/Shanghai）算**：`src/utils/date.ts` 用 `Intl.DateTimeFormat` 显式指定 `timeZone`，**不用 `new Date().getDate()`**（那是运行环境的本地时区，CI 与国内用户的电脑上会差一天）。跟后端 `app/core/timezone.py` 的 `today()` 同一个口径，前后端对着 `packages/shared/timezone-contract.json` 这份契约各自断言。
 
 ## 页面与路由
 
@@ -50,5 +51,4 @@ tests/                 vitest 测试
 ## 已知占位 / 技术债
 
 - **地址是写死的**（`src/constants/addresses.ts`）：后端没有「我的地址」接口，FE-03 上了接口后把这里换成一次 API 调用即可，页面不用改。
-- **「今天」按 UTC 算**（`src/utils/date.ts`），与后端 `app/services/user_queries.py` 的 `today()` 保持一致。面向国内用户时两边都要改成 Asia/Shanghai，不能只改一边。
 - **没有 `GET /api/v1/items/{id}`**：下单页拿不到服务项详情，商品名称由列表页通过 query 带过去（`itemName`）。

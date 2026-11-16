@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, time, timedelta
+from datetime import time, timedelta
 from decimal import Decimal
 
 import httpx
@@ -41,6 +41,7 @@ from app.models.order import Order
 from app.models.provider import Master, ServiceProvider
 from app.models.schedule_slot import ScheduleSlot
 from app.models.user import User
+from tests.support import business_today
 
 ORDERS_URL = "/api/v1/provider/orders"
 MASTERS_URL = "/api/v1/provider/masters"
@@ -101,7 +102,7 @@ async def _seed(db) -> dict[str, int]:
     后面服务新建的行拿到 id=1，跟已存在的行撞车。id 一律从落库对象上取。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
 
     async with maker() as session:
         provider_a = ServiceProvider(name="甲服务商", contact_phone="13900000001")

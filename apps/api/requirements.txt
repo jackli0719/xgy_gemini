@@ -13,3 +13,6 @@ python-dotenv>=1.0
 # 解码时显式钉住 algorithms=[...]，杜绝算法混淆；
 # 且 python-jose 有一串未修的 CVE 历史（JWT bomb 拒服务、算法混淆）。
 pyjwt>=2.8
+# 时区数据：zoneinfo 需要系统的 tz 数据库，slim 镜像里不一定有。
+# 装上它，Asia/Shanghai 这类时区在任何镜像里都能解析（不装会在启动时炸）。
+tzdata>=2024.1

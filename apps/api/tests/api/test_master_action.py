@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -51,6 +51,7 @@ from app.services.errors import MasterActionInvariantError, OrderNotFoundError
 from app.services.master_action import _assert_written_state
 from app.services.master_action import accept_order, reject_order
 from support import Rendezvous, RendezvousSession, is_order_update
+from tests.support import business_today
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -292,7 +293,7 @@ async def seeded(db):
     （不是外键依赖序），所以这里按依赖顺序逐个 flush，避免外键违例。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     async with maker() as session:
         session.add_all(
             [

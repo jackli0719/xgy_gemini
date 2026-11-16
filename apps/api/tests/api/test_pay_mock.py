@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -39,6 +39,7 @@ from app.models.user import User
 from app.schemas.pay import MockPayNotifyRequest, MockPayResult
 from app.services.errors import InvalidOrderStateError, OrderNotFoundError
 from app.services.pay_mock import mock_pay_success
+from tests.support import business_today
 
 MOCK_URL = "/api/v1/pay/mock-notify"
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -237,7 +238,7 @@ async def seeded(db) -> Seed:
     - 已接单且已支付——重复回调走幂等分支。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     async with maker() as session:
         # 模型层没有 relationship，SQLAlchemy 的 flush 顺序按 mapper 类名字母序
         # （不是外键依赖序），所以这里按依赖顺序逐个 flush，避免外键违例
