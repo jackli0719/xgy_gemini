@@ -41,13 +41,13 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import NoReturn
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
+from app.core.timezone import now_utc
 from app.domain.order_state import assert_transition
 from app.models.enums import MasterStatus, OperatorType, OrderStatus, UserRole
 from app.models.order import Order, OrderStatusLog
@@ -151,7 +151,7 @@ async def dispatch_order(
                 "师傅当前不可接单：master_id={}".format(master_id)
             )
 
-        now = datetime.now(timezone.utc)
+        now = now_utc()
 
         # 条件 UPDATE：把「这单还没被派走」写进 WHERE 谓词，
         # 由数据库的行锁保证并发下只有一个请求能改成功。

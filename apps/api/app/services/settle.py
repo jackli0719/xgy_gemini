@@ -4,7 +4,8 @@
 客户可能还在投诉、工期可能有争议。所以规则是 **T+1**：完工满一天的订单
 才进入结算。本 service 负责把这类订单聚成「待结算」结算单：
 
-- 找出 ``status='COMPLETED'`` 且 ``completed_at < now - 1 天`` 的订单；
+- 找出 ``status='COMPLETED'`` 且 ``completed_at < 今天业务零点`` 的订单
+  （业务时区，默认 Asia/Shanghai；见 ``app.core.timezone``）；
 - 按服务商聚合（不强求按天：同一批订单的周期由它们的完工日期决定）；
 - 佣金按 ``service_provider.commission_rate`` 算：
   ``commission = 合计 × 费率``，``net = 合计 - 佣金``（服务商实收）；
@@ -41,13 +42,14 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
+from app.core.timezone import business_date, business_datetime, now_utc
 from app.domain.order_state import assert_transition
 from app.models.audit_log import AuditLog
 from app.models.enums import OperatorType, OrderStatus, SettlementStatus, UserRole
@@ -70,7 +72,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# T+1：完工满一天才进结算
+# T+1：业务日期 D 完工的订单，D+1 那天（业务零点起）才进结算
 SETTLE_DELAY_DAYS = 1
 
 # 状态流转日志里留下的原因
@@ -109,10 +111,25 @@ async def generate_pending_settlements(
     ``now`` 为 None 时取当前时间（传入的必须是带时区的时间，naive 视为 UTC）。
     传入的 session 不能有活动事务——本函数自己管理事务。
 
+    **T+1 的边界是「业务零点」**：只有**在今天业务时间开始之前**完工的订单
+    才进结算。也就是说：业务日期 D 完工的订单，D+1 那天（业务时间 00:00 起）
+    才进结算单——这就是 T+1 的含义。
+
+    为什么按业务零点而不是「完工后满 24 小时」：满 24 小时是绝对时长，
+    跟「一天」对不上。UTC 16:00 完工（= 北京时间次日 00:00）的单，
+    按绝对时长要等到北京时间次日 07:30 才满 24 小时；
+    按业务日期（T+1）则是次日零点整就该进结算——业务上更说得通，
+    也跟「今天 / 昨天」这些业务日期是同一个口径。
+
     **不抛业务异常**：单个服务商那一组失败只记日志，继续下一组。
     """
     current = _resolve_now(now)
-    cutoff = current - timedelta(days=SETTLE_DELAY_DAYS)
+    # 业务零点 = 业务时区的今天 00:00；往前推 SETTLE_DELAY_DAYS - 1 天，
+    # 就是「完工于今天业务时间开始之前」。
+    cutoff = business_datetime(
+        business_date(current) - timedelta(days=SETTLE_DELAY_DAYS - 1),
+        time.min,
+    )
 
     # 候选查询单独一个事务：查完就提交，把事务边界让给逐服务商的结算。
     async with session.begin():
@@ -220,8 +237,10 @@ async def _settle_provider(
         )
         commission, net = _split_amounts(total, provider.commission_rate)
 
-        period_start = min(row.completed_at.date() for row in claimed)
-        period_end = max(row.completed_at.date() for row in claimed)
+        # 结算周期按**业务日期**算：completed_at 是绝对时刻，
+        # 直接 .date() 取到的是 UTC 日期，国内用户看到的周期会差一天。
+        period_start = min(business_date(row.completed_at) for row in claimed)
+        period_end = max(business_date(row.completed_at) for row in claimed)
 
         settlement = Settlement(
             provider_id=provider_id,
@@ -309,7 +328,8 @@ async def confirm_settlement(
     _require_finance_role(current)
 
     async with session.begin():
-        now = datetime.now(timezone.utc)
+        # 存库时间戳用 UTC（绝对时刻）；业务日期的换算在别处按业务时区做。
+        now = now_utc()
 
         # 条件 UPDATE 认领结算单：只有还「待结算」的才动得了。
         # 两个财务同时确认时，先拿到行锁的一方赢，另一方等锁期间
@@ -460,9 +480,12 @@ def _resolve_now(now: datetime | None) -> datetime:
 
     库里存的是带时区的时间（timestamptz），拿 naive 时间去比较会直接抛异常——
     与其抛异常，不如明确按 UTC 解释。
+
+    注意这里取的是**绝对时刻**（UTC）：业务日期的换算在
+    ``business_date`` 那一处做，不在这一处。
     """
     if now is None:
-        return datetime.now(timezone.utc)
+        return now_utc()
     if now.tzinfo is None:
         return now.replace(tzinfo=timezone.utc)
     return now

@@ -20,6 +20,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.place_order as place_order_module
+from tests.support import business_today
+from app.core.timezone import business_datetime
 from app.domain.slot_rule import SlotNotReservableError
 from app.models.address import Address
 from app.models.base import Base
@@ -526,7 +528,7 @@ async def db():
 @pytest.fixture
 async def seeded(db) -> Seed:
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     async with maker() as session:
         # 模型层没有 relationship，SQLAlchemy 的 flush 顺序按 mapper 类名字母序
         # （不是外键依赖序），所以这里按依赖顺序逐个 flush，避免外键违例
@@ -810,3 +812,41 @@ async def test_integration_concurrent_orders_do_not_oversell(db, seeded) -> None
             await session.execute(select(func.count()).select_from(Order))
         ).scalar_one()
         assert orders == capacity
+
+
+@pytest.mark.integration
+async def test_slot_started_in_business_time_is_rejected(db, seeded, monkeypatch) -> None:
+    """时段按**业务墙钟**判断是否已过：今天 09:00 的时段，12:00 之后不能再约。
+
+    之前时段是按 UTC 解释的：今天 09:00 被当成「UTC 09:00」= 北京时间 17:00，
+    于是已经过了 3 小时的时段照样能约得到。
+    """
+    today = business_today()
+    # 把「现在」固定在今天 12:00（业务时区），让用例跟跑测试的时刻无关
+    monkeypatch.setattr(
+        place_order_module, "now", lambda: business_datetime(today, time(12, 0))
+    )
+
+    maker = _maker(db)
+    async with maker() as session:
+        session.add(
+            ScheduleSlot(
+                id=5,
+                item_id=seeded.item_id,
+                date=today,
+                start_time=time(9, 0),
+                end_time=time(12, 0),
+                capacity=5,
+            )
+        )
+        await session.commit()
+
+    async with maker() as session:
+        with pytest.raises(SlotNotInFutureError):
+            await place_order(
+                session,
+                user_id=seeded.user_id,
+                item_id=seeded.item_id,
+                slot_id=5,
+                address_id=seeded.address_id,
+            )

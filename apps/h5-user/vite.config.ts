@@ -33,6 +33,9 @@ export default defineConfig({
       "@oto/shared/api": fileURLToPath(
         new URL("../../packages/shared/src/api/index.ts", import.meta.url),
       ),
+      "@oto/shared/timezone": fileURLToPath(
+        new URL("../../packages/shared/src/timezone/index.ts", import.meta.url),
+      ),
     },
   },
   server: {

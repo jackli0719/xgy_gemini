@@ -25,6 +25,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from tests.support import business_today
 from app.core.auth import create_access_token
 from app.core.database import get_session
 from app.main import app
@@ -129,7 +130,7 @@ async def seeded(db) -> Seed:
     - 订单：A 25 笔、B 1 笔
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    today = date.today()
+    today = business_today()
     tomorrow = today + timedelta(days=1)
     yesterday = today - timedelta(days=1)
 
@@ -473,7 +474,7 @@ async def test_order_detail_of_my_own_order_returns_it(api_client, seeded) -> No
 @pytest.mark.integration
 async def test_slots_available_is_capacity_minus_used(api_client, seeded) -> None:
     """available = capacity - used，且已约满的时段不出现在列表里。"""
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (business_today() + timedelta(days=1)).isoformat()
     response = await api_client.get(
         "/api/v1/items/{}/slots".format(seeded.item_id),
         params={"date": tomorrow},
@@ -501,7 +502,7 @@ async def test_slots_available_is_capacity_minus_used(api_client, seeded) -> Non
 @pytest.mark.integration
 async def test_slots_of_past_date_returns_empty(api_client, seeded) -> None:
     """过去的日期没有可约时段（返回空列表，不是错误）。"""
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (business_today() - timedelta(days=1)).isoformat()
     response = await api_client.get(
         "/api/v1/items/{}/slots".format(seeded.item_id),
         params={"date": yesterday},
@@ -514,7 +515,7 @@ async def test_slots_of_past_date_returns_empty(api_client, seeded) -> None:
 @pytest.mark.integration
 async def test_slots_of_today_are_returned(api_client, seeded) -> None:
     """当天的时段要出现（规则是 date >= today，不是 > today）。"""
-    today = date.today().isoformat()
+    today = business_today().isoformat()
     response = await api_client.get(
         "/api/v1/items/{}/slots".format(seeded.item_id),
         params={"date": today},
@@ -528,7 +529,7 @@ async def test_slots_of_today_are_returned(api_client, seeded) -> None:
 @pytest.mark.integration
 async def test_slots_of_unknown_item_returns_404(api_client, seeded) -> None:
     """服务项不存在 -> 404。"""
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (business_today() + timedelta(days=1)).isoformat()
     response = await api_client.get(
         "/api/v1/items/999999/slots",
         params={"date": tomorrow},
@@ -681,7 +682,7 @@ async def test_category_items_unknown_and_inactive_are_both_404(
 @pytest.mark.integration
 async def test_queries_require_authentication(api_client, seeded) -> None:
     """没有 token 的查询一律 401。"""
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (business_today() + timedelta(days=1)).isoformat()
     cases = [
         ("GET", CATALOG_URL, None),
         ("GET", "{}/{}/items".format(CATALOG_URL, seeded.root_category_id), None),

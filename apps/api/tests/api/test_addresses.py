@@ -21,6 +21,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from tests.support import business_today
 from app.core.auth import create_access_token
 from app.core.database import get_session
 from app.main import app
@@ -343,7 +344,7 @@ async def _create_order_for_address(
     订单表的 address_id 上是 RESTRICT 外键：地址一旦被订单引用就删不掉。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     async with maker() as session:
         category = ServiceCategory(name="家庭保洁", parent_id=None, sort_order=1)
         session.add(category)

@@ -24,6 +24,7 @@ import pytest
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from tests.support import business_today
 from app.api.v1 import settlements as confirm_router
 from app.core.auth import CurrentUser, create_access_token
 from app.core.database import get_session
@@ -268,7 +269,7 @@ async def db():
 async def seeded(db):
     """种一个服务商、一个平台财务账号、两笔「待结算」订单、一张待结算结算单。"""
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     now = datetime.now(timezone.utc)
     async with maker() as session:
         session.add(

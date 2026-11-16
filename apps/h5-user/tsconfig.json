@@ -18,7 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@oto/shared/api": ["../../packages/shared/src/api/index.ts"]
+      "@oto/shared/api": ["../../packages/shared/src/api/index.ts"],
+      "@oto/shared/timezone": ["../../packages/shared/src/timezone/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"]

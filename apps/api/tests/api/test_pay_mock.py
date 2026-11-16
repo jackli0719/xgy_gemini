@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 import app.api.v1.pay as pay_module
 import app.services.pay_mock as pay_mock_module
+from tests.support import business_today
 from app.core.config import settings
 from app.core.database import get_session
 from app.domain.order_state import OrderTransitionError
@@ -237,7 +238,7 @@ async def seeded(db) -> Seed:
     - 已接单且已支付——重复回调走幂等分支。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     async with maker() as session:
         # 模型层没有 relationship，SQLAlchemy 的 flush 顺序按 mapper 类名字母序
         # （不是外键依赖序），所以这里按依赖顺序逐个 flush，避免外键违例

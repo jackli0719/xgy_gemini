@@ -27,12 +27,13 @@ JWT 库用 PyJWT（见 requirements.txt）：HS256 只需要标准库 hmac，
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import jwt
 from fastapi import Depends, Header, HTTPException, status
 
 from app.core.config import settings
+from app.core.timezone import now_utc
 from app.models.enums import UserRole
 
 __all__ = [
@@ -136,7 +137,7 @@ def create_access_token(
     在没想清楚的情况下签出一个角色错配的 token。
     """
     resolved_role = _coerce_role(role)
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.jwt_access_expire_minutes)
     payload = {

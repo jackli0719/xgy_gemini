@@ -39,12 +39,11 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser
+from app.core.timezone import now_utc
 from app.domain.order_state import assert_transition
 from app.models.enums import MasterStatus, OperatorType, OrderStatus, UserRole
 from app.models.order import Order, OrderStatusLog
@@ -194,7 +193,7 @@ async def confirm_complete(
     _require_user_role(current)
 
     async with session.begin():
-        now = datetime.now(timezone.utc)
+        now = now_utc()
 
         order_id = await _claim_order(
             session,

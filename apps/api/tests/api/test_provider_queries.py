@@ -25,6 +25,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from tests.support import business_today
 from app.core.auth import create_access_token
 from app.core.database import get_session
 from app.main import app
@@ -101,7 +102,7 @@ async def _seed(db) -> dict[str, int]:
     后面服务新建的行拿到 id=1，跟已存在的行撞车。id 一律从落库对象上取。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
 
     async with maker() as session:
         provider_a = ServiceProvider(name="甲服务商", contact_phone="13900000001")

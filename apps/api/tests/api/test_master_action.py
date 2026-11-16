@@ -25,6 +25,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.services.master_action as master_action_module
+from tests.support import business_today
 from app.api.v1.errors import status_for
 from app.core.auth import CurrentUser, create_access_token
 from app.core.database import get_session
@@ -292,7 +293,7 @@ async def seeded(db):
     （不是外键依赖序），所以这里按依赖顺序逐个 flush，避免外键违例。
     """
     maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = business_today() + timedelta(days=1)
     async with maker() as session:
         session.add_all(
             [

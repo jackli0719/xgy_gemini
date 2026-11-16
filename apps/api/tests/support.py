@@ -1,4 +1,10 @@
-"""跨测试文件复用的并发测试助手。
+"""跨测试文件复用的测试助手。
+
+两样东西：
+
+1. ``business_today()``：业务时区的「今天」——测试里统一用它，
+   不用 ``date.today()``（那是跑测试的机器的本地时区，CI 与本地会差一天）；
+2. 并发测试的会合点助手（Rendezvous 等）。
 
 **会合点（rendezvous）必须落在「实现第一次碰到该表的位置」**，
 不能落在某个固定语句上：
@@ -15,12 +21,32 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
 from sqlalchemy import Select, Update
 
 from app.models.order import Order
 
-__all__ = ["Rendezvous", "RendezvousSession", "is_order_update", "touches_order"]
+__all__ = [
+    "Rendezvous",
+    "RendezvousSession",
+    "business_today",
+    "is_order_update",
+    "touches_order",
+]
+
+
+def business_today() -> date:
+    """业务时区（``settings.timezone``，默认 Asia/Shanghai）的今天。
+
+    测试里**不要**用 ``date.today()``：那是**跑测试的机器**的本地时区，
+    CI 上是 UTC、本地是 Asia/Shanghai，两边会差一天——「明天」的时段
+    在 UTC 的 CI 上会变成「今天」，「过去的时段」也会跟着漂，
+    用例就会随机红。业务日期只有一个口径，就跟后端对齐。
+    """
+    from app.core.timezone import today
+
+    return today()
 
 
 class Rendezvous:
