@@ -78,6 +78,10 @@ class MasterOrderDetail(MasterOrderItem):
     customer_phone: str = Field(..., description="客户电话")
     address_region: str = Field(..., description="地址所在区域")
     address_detail: str = Field(..., description="详细地址")
+    # 完成时间：客户确认完成（或自动确认）时才写，没完成就是 null。
+    completed_at: datetime | None = Field(
+        default=None, description="完成时间（未完成时为 null）"
+    )
 
 
 class MasterProfile(BaseModel):

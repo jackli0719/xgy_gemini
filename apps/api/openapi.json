@@ -3457,6 +3457,19 @@
             "type": "string",
             "title": "Address Detail",
             "description": "详细地址"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "完成时间（未完成时为 null）"
           }
         },
         "additionalProperties": false,
@@ -3852,6 +3865,19 @@
             "type": "integer",
             "title": "Address Id",
             "description": "收货地址 ID"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "完成时间（未完成时为 null）"
           }
         },
         "additionalProperties": false,

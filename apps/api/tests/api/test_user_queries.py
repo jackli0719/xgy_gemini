@@ -23,6 +23,7 @@ from decimal import Decimal
 
 import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.auth import create_access_token
@@ -464,6 +465,51 @@ async def test_order_detail_of_my_own_order_returns_it(api_client, seeded) -> No
     # 内部派单信息不外发
     assert "provider_id" not in body
     assert "master_id" not in body
+
+
+@pytest.mark.integration
+async def test_order_detail_of_unfinished_order_has_null_completed_at(
+    api_client, seeded
+) -> None:
+    """没完成的订单：完成时间是 null（不是 0、也不是空串）。"""
+    response = await api_client.get(
+        "{}/{}".format(ORDERS_URL, seeded.newest_order_no),
+        headers=_auth_header(seeded.user_a_id),
+    )
+    assert response.status_code == 200
+    assert response.json()["completed_at"] is None
+
+
+@pytest.mark.integration
+async def test_order_detail_of_completed_order_has_completed_at(
+    api_client, seeded, db
+) -> None:
+    """已完成的订单：详情带完成时间（UI-02b）。
+
+    完成时间直接来自订单表的 ``completed_at``（客户确认完成时写的），
+    前端不用再从确认接口的响应里兜。
+    """
+    maker = async_sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
+    completed_at = datetime.now(timezone.utc)
+    async with maker() as session:
+        result = await session.execute(
+            select(Order).where(Order.order_no == seeded.newest_order_no)
+        )
+        order = result.scalar_one()
+        order.status = OrderStatus.COMPLETED
+        order.completed_at = completed_at
+        await session.commit()
+
+    response = await api_client.get(
+        "{}/{}".format(ORDERS_URL, seeded.newest_order_no),
+        headers=_auth_header(seeded.user_a_id),
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["completed_at"] is not None
+    # 存库是 UTC，接口原样给（前端按业务时区格式化）
+    assert datetime.fromisoformat(body["completed_at"]) == completed_at
 
 
 # =====================================================================

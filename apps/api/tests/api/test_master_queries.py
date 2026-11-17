@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import inspect
 import os
-from datetime import time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import httpx
@@ -93,6 +93,9 @@ MY_COMPLETED_ORDER_NO = "OTO20260101000007"
 MISSING_ORDER_NO = "OTO20260101009999"
 
 BASE_PRICE = Decimal("100.00")
+
+# 已完成订单的完成时间（UTC 存库，接口原样给出，前端按业务时区格式化）
+COMPLETED_AT = datetime(2026, 1, 1, 2, 30, tzinfo=timezone.utc)
 
 
 def _auth_header(user_id: int, role: UserRole, provider_id: int | None) -> dict[str, str]:
@@ -173,6 +176,7 @@ def test_response_field_sets() -> None:
         "customer_phone",
         "address_region",
         "address_detail",
+        "completed_at",
     }
     assert set(MasterProfile.model_fields) == {
         "real_name",
@@ -345,6 +349,7 @@ async def seeded(db):
             status: OrderStatus,
             master_id: int | None,
             provider_id: int | None = MY_PROVIDER_ID,
+            completed_at: datetime | None = None,
         ) -> Order:
             return Order(
                 id=order_id,
@@ -358,6 +363,7 @@ async def seeded(db):
                 amount=BASE_PRICE,
                 status=status,
                 pay_status=PayStatus.PAID,
+                completed_at=completed_at,
             )
 
         session.add_all(
@@ -404,6 +410,8 @@ async def seeded(db):
                     MY_COMPLETED_ORDER_NO,
                     OrderStatus.COMPLETED,
                     MY_MASTER_ID,
+                    # 已完成的单有完成时间（客户确认完成时写的）
+                    completed_at=COMPLETED_AT,
                 ),
             ]
         )
@@ -504,6 +512,28 @@ async def test_order_detail(api_client, seeded) -> None:
     assert body["customer_phone"] == "13900000001"
     assert body["address_region"] == "北京市朝阳区"
     assert body["address_detail"] == "建国路 88 号 3 单元 501"
+
+
+@pytest.mark.integration
+async def test_order_detail_carries_completed_at(api_client, seeded) -> None:
+    """师傅端详情：已完成的单带完成时间，没完成的单是 null（UI-02b）。"""
+    completed = await api_client.get(
+        "{}/{}".format(ORDERS_URL, MY_COMPLETED_ORDER_NO),
+        headers=_my_master_header(),
+    )
+    assert completed.status_code == 200, completed.text
+    body = completed.json()
+    assert body["status"] == "COMPLETED"
+    assert body["completed_at"] is not None
+    # 存库是 UTC，接口原样给（前端按业务时区格式化）
+    assert datetime.fromisoformat(body["completed_at"]) == COMPLETED_AT
+
+    pending = await api_client.get(
+        "{}/{}".format(ORDERS_URL, MY_PENDING_ORDER_NO),
+        headers=_my_master_header(),
+    )
+    assert pending.status_code == 200, pending.text
+    assert pending.json()["completed_at"] is None
 
 
 @pytest.mark.integration

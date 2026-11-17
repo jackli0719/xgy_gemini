@@ -1315,6 +1315,11 @@ export interface components {
              * @description 详细地址
              */
             address_detail: string;
+            /**
+             * Completed At
+             * @description 完成时间（未完成时为 null）
+             */
+            completed_at?: string | null;
         };
         /**
          * MasterOrderItem
@@ -1627,6 +1632,11 @@ export interface components {
              * @description 收货地址 ID
              */
             address_id: number;
+            /**
+             * Completed At
+             * @description 完成时间（未完成时为 null）
+             */
+            completed_at?: string | null;
         };
         /**
          * OrderListItem

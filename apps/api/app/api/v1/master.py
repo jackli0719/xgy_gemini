@@ -123,6 +123,7 @@ async def get_master_order(
         customer_phone=row.customer_phone,
         address_region=row.address_region,
         address_detail=row.address_detail,
+        completed_at=row.completed_at,
     )
 
 

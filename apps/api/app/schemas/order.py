@@ -104,3 +104,8 @@ class OrderDetail(OrderListItem):
     slot_id: int = Field(..., description="预约时段 ID")
     slot_end_time: time = Field(..., description="预约结束时间")
     address_id: int = Field(..., description="收货地址 ID")
+    # 完成时间：客户确认完成（或自动确认）时才写。
+    # 没完成的订单这里是 null——前端据此决定要不要显示「完成时间」。
+    completed_at: datetime | None = Field(
+        default=None, description="完成时间（未完成时为 null）"
+    )
