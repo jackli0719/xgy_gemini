@@ -7,9 +7,17 @@
  *
  * 另外钉一条边界：**前端不带 provider_id**——请求参数里只有状态和分页，
  * 归属由后端按 token 决定（卡片约束 1）。
+ *
+ * UI-03 追加盯四件事：
+ * 1. 列表空 -> 显示空状态（一句人话 + 刷新按钮）；
+ * 2. 没有在岗师傅 -> 提示「暂无在岗师傅」+ 确认按钮禁用；
+ * 3. 连点两次只发一次请求（同步 ref 守住，不只靠 disabled）；
+ * 4. 派单 409 / 404 -> 显示后端原话 + 刷新列表。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ApiError } from "@oto/shared/api";
 
 import ProviderDispatchView from "@/views/ProviderDispatchView.vue";
 
@@ -206,5 +214,150 @@ describe("派单页", () => {
     // 停用 / 未审核的师傅不该出现：派单会被后端拒掉（409）
     expect(labels).not.toContain("师傅丙");
     expect(labels).not.toContain("师傅丁");
+  });
+});
+
+describe("UI-03 派单路径打磨", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    mockClient.listProviderOrders.mockResolvedValue(ORDERS);
+    mockClient.listProviderMasters.mockResolvedValue(MASTERS);
+    mockClient.dispatchOrder.mockResolvedValue({
+      order_no: "OTO20260101000001",
+      status: "PENDING_ACCEPT",
+      master_id: 202,
+    });
+  });
+
+  it("待派单列表为空时显示空状态，刷新按钮能再拉一次", async () => {
+    mockClient.listProviderOrders.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 20,
+      offset: 0,
+    });
+
+    const wrapper = await mountDispatchPage();
+
+    // 空状态：一句人话 + 刷新按钮
+    expect(wrapper.find('[data-test="dispatch-empty"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("暂无待派单订单");
+    // 空的时候不摆一张空表
+    expect(wrapper.find(".el-table").exists()).toBe(false);
+
+    await wrapper.find('[data-test="dispatch-empty-refresh"]').trigger("click");
+    await flushPromises();
+    expect(mockClient.listProviderOrders).toHaveBeenCalledTimes(2);
+  });
+
+  it("没有在岗师傅时提示「暂无在岗师傅」，确认按钮禁用", async () => {
+    // 只有一个已停用的师傅：下拉里没有可选的人
+    mockClient.listProviderMasters.mockResolvedValue({
+      items: [
+        {
+          id: 203,
+          real_name: "师傅丙",
+          phone: "13800000007",
+          rating: "4.0",
+          status: "DISABLED",
+        },
+      ],
+      total: 1,
+    });
+
+    const wrapper = await mountDispatchPage();
+    await wrapper.findAll('[data-test="dispatch-btn"]')[0].trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="no-master-hint"]').text()).toContain("暂无在岗师傅");
+    // 没有人可派：确认按钮点下去也只会吃一个 409，直接禁掉
+    expect(wrapper.find('[data-test="dispatch-confirm"]').attributes("disabled")).toBeDefined();
+    expect(mockClient.dispatchOrder).not.toHaveBeenCalled();
+  });
+
+  it("派单提交中连点两次只发一次请求", async () => {
+    // 派单请求悬而未决：第一次还在途时点第二次，才测得到防连点。
+    let resolveDispatch: (value: unknown) => void = () => {};
+    mockClient.dispatchOrder.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveDispatch = resolve;
+        }),
+    );
+
+    const wrapper = await mountDispatchPage();
+
+    // 先选师傅（选不了就没法派）
+    await wrapper.findAll('[data-test="dispatch-btn"]')[0].trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="master-select"] input').trigger("click");
+    await flushPromises();
+    await wrapper.findAll(".el-select-dropdown__item")[1].trigger("click");
+    await flushPromises();
+
+    // 真·连点：两次派发之间不 await（同一个 tick 内），
+    // 此时 DOM 上的 disabled 还没 patch 出来，第二次照样进得来 handler。
+    const button = wrapper.find('[data-test="dispatch-confirm"]');
+    await Promise.all([button.trigger("click"), button.trigger("click")]);
+    await flushPromises();
+
+    expect(mockClient.dispatchOrder).toHaveBeenCalledTimes(1);
+    // 在途期间按钮是禁用的
+    expect(wrapper.find('[data-test="dispatch-confirm"]').attributes("disabled")).toBeDefined();
+
+    resolveDispatch?.({
+      order_no: "OTO20260101000001",
+      status: "PENDING_ACCEPT",
+      master_id: 202,
+    });
+    await flushPromises();
+  });
+
+  it("派单 409（订单已被派走）时显示后端原话并刷新列表", async () => {
+    mockClient.dispatchOrder.mockRejectedValue(
+      new ApiError(409, "订单已派单，不能重复派单：order_id=101", null),
+    );
+
+    const wrapper = await mountDispatchPage();
+    await dispatchTo(wrapper, 1);
+
+    // 后端原话，不换成自己的文案
+    expect(wrapper.find('[data-test="dispatch-error"]').text()).toContain(
+      "订单已派单，不能重复派单",
+    );
+    // 刷新了列表：409 意味着这行已经不是待派单了，页面上的列表过期了
+    expect(mockClient.listProviderOrders).toHaveBeenCalledTimes(2);
+    // 弹窗不关：换个师傅还能再试
+    expect(wrapper.find('[data-test="dispatch-dialog"]').exists()).toBe(true);
+  });
+
+  it("派单 404（师傅不存在）时显示后端原话并刷新列表", async () => {
+    mockClient.dispatchOrder.mockRejectedValue(
+      new ApiError(404, "师傅不存在：master_id=202", null),
+    );
+
+    const wrapper = await mountDispatchPage();
+    await dispatchTo(wrapper, 1);
+
+    expect(wrapper.find('[data-test="dispatch-error"]').text()).toContain("师傅不存在");
+    // 404 说明可选师傅列表也过期了，一样刷新
+    expect(mockClient.listProviderOrders).toHaveBeenCalledTimes(2);
+    expect(mockClient.listProviderMasters).toHaveBeenCalledTimes(2);
+  });
+
+  it("派单失败（500）显示后端原话，但不刷新列表", async () => {
+    mockClient.dispatchOrder.mockRejectedValue(
+      new ApiError(500, "服务暂时不可用，请稍后再试", null),
+    );
+
+    const wrapper = await mountDispatchPage();
+    await dispatchTo(wrapper, 1);
+
+    expect(wrapper.find('[data-test="dispatch-error"]').text()).toContain(
+      "服务暂时不可用",
+    );
+    // 500 不是「列表过期」，刷新没有意义
+    expect(mockClient.listProviderOrders).toHaveBeenCalledTimes(1);
   });
 });

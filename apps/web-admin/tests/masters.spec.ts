@@ -144,3 +144,54 @@ describe("师傅管理页", () => {
     expect(params).not.toHaveProperty("provider_id");
   });
 });
+
+describe("UI-03 师傅管理页打磨", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    mockClient.listProviderMasters.mockResolvedValue(MASTERS);
+    mockClient.updateProviderMaster.mockResolvedValue(MASTERS.items[0]);
+  });
+
+  it("师傅列表为空时显示空状态，刷新按钮能再拉一次", async () => {
+    mockClient.listProviderMasters.mockResolvedValue({ items: [], total: 0 });
+
+    const wrapper = await mountMastersPage();
+
+    expect(wrapper.find('[data-test="masters-empty"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("暂无师傅");
+    // 空的时候不摆一张空表
+    expect(wrapper.find(".el-table").exists()).toBe(false);
+
+    await wrapper.find('[data-test="masters-empty-refresh"]').trigger("click");
+    await flushPromises();
+    expect(mockClient.listProviderMasters).toHaveBeenCalledTimes(2);
+  });
+
+  it("状态切换中按钮显示 loading 并禁用，连点只改一次", async () => {
+    // 改状态请求悬而未决：第一次还在途时点第二次，才测得到防连点。
+    let resolveUpdate: (value: unknown) => void = () => {};
+    mockClient.updateProviderMaster.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        }),
+    );
+
+    const wrapper = await mountMastersPage();
+    const button = wrapper.findAll('[data-test="toggle-btn"]')[0];
+
+    // 真·连点：两次派发之间不 await（同一个 tick 内）
+    await Promise.all([button.trigger("click"), button.trigger("click")]);
+    await flushPromises();
+
+    expect(mockClient.updateProviderMaster).toHaveBeenCalledTimes(1);
+    // 在途期间：loading + 禁用
+    const during = wrapper.findAll('[data-test="toggle-btn"]')[0];
+    expect(during.classes()).toContain("is-loading");
+    expect(during.attributes("disabled")).toBeDefined();
+
+    resolveUpdate?.(MASTERS.items[0]);
+    await flushPromises();
+  });
+});
