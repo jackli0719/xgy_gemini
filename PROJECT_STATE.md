@@ -23,7 +23,8 @@
   服务商侧师傅管理、平台侧服务商管理与品类管理与订单总览、结算单生成（T+1）与财务确认、
   **师傅自助入驻（登记 → 平台审核）**。
 - 前端三端：用户登录/地址/服务/下单；师傅待接单/开工完工；**师傅入驻申请页（选服务商 → 审核中 / 已入职分流）**；后台派单、师傅管理、服务商管理、订单总览、品类管理、结算确认、**平台侧师傅入驻审核页（通过可改判服务商 / 驳回必填理由）**。
-- 质量：后端 948 个用例（集成 348 个真跑、0 skip）、前端三端 118 个用例、API 级四端闭环 E2E、变异测试。
+- **用户下单路径的打磨（UI-01）**：品类列表 / 品类详情 / 下单页 / 订单列表四个页面统一了空状态（引导文案 + 按钮）、loading（骨架屏）、错误（网络错提示重试、业务错显示后端原话）；下单按钮提交中禁用，连点两次只发一次请求。
+- 质量：后端 948 个用例（集成 348 个真跑、0 skip）、前端三端 131 个用例、API 级四端闭环 E2E、变异测试。
 - 时区：全仓统一 Asia/Shanghai，业务日期（今天/时段/阈值/结算周期）按业务时区算，存库仍是 UTC timestamptz。
 
 ## 未完成
@@ -68,10 +69,10 @@
 
 ## 当前 commit
 
-- 本分支：`fix/DEPLOY-01-checklist-greps` —— DEPLOY-01 合并后的清单修补，本地提交，**未 push、未开 PR**。
-- 修补内容：`docs/PRODUCTION_CHECKLIST.md` 第 2 / 6 条的 grep 漏了中文尖括号占位
-  （`POSTGRES_USER=<数据库用户名>` 这类），照抄 `.env.example` 的 `.env` 会「假通过」。
-- `main` HEAD：`19f9adc feat(DEPLOY-01): prod config placeholder guard + production checklist (#11)`
+- 本分支：`feature/UI-01-user-order-path` —— 用户下单路径打磨（4 个页面），本地提交，**未 push、未开 PR**。
+- 内容：空状态（引导文案 + 按钮）/ 骨架屏 / 错误分流（网络错 vs 业务错）/ 下单按钮防连点，
+  新增 `src/utils/error.ts`（错误文案翻译）与 `src/utils/date.ts` 的 `shiftDate`（换一天）。
+- `main` HEAD：`de6e948 fix(DEPLOY-01): checklist grep for CJK placeholders + literal branch test (#12)`
 - 本文件自身的提交见 `git log -1`（也在这个分支上，随 PR 一起合并）。
 
 ## CI 现状

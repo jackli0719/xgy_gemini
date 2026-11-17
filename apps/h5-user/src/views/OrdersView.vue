@@ -6,12 +6,15 @@
  * 后端已经按「当前登录用户」过滤（R5），前端不需要也不能传 user_id。
  *
  * 分页：每页 20 条（后端上限 100），用 total 判断还有没有下一页。
+ *
+ * 三种页面状态（UI-01）：骨架屏 / 出错（有重试）/ 空数据（有引导按钮）。
  */
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 
 import { api } from "@/api";
 import { ORDER_STATUS_TEXT } from "@/constants/status";
+import { errorMessage } from "@/utils/error";
 import type { components } from "@oto/shared/api";
 
 type OrderListItem = components["schemas"]["OrderListItem"];
@@ -40,7 +43,7 @@ async function load(): Promise<void> {
     orders.value = result.items;
     total.value = result.total;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : "订单加载失败";
+    error.value = errorMessage(err, "订单加载失败");
   } finally {
     loading.value = false;
   }
@@ -54,15 +57,36 @@ function turn(pageNo: number): void {
 function open(orderNo: string): void {
   void router.push(`/orders/${orderNo}`);
 }
+
+/** 空状态里给一条出路：还没有订单就先去下第一单。 */
+function goCatalog(): void {
+  void router.push("/catalog");
+}
 </script>
 
 <template>
   <div class="page">
     <h2 class="page-title">我的订单</h2>
 
-    <van-loading v-if="loading" size="24" data-test="loading">加载中</van-loading>
-    <p v-else-if="error" class="page-error" data-test="error">{{ error }}</p>
-    <van-empty v-else-if="orders.length === 0" description="还没有订单" />
+    <div v-if="loading" data-test="skeleton">
+      <van-skeleton title :row="4" />
+    </div>
+
+    <div v-else-if="error" class="page-block" data-test="error-block">
+      <p class="page-error" data-test="error">{{ error }}</p>
+      <van-button size="small" plain type="primary" data-test="retry" @click="load">
+        重试
+      </van-button>
+    </div>
+
+    <van-empty v-else-if="orders.length === 0" data-test="empty">
+      <template #description>
+        <span data-test="empty-text">你还没有下过单，先挑个服务试试</span>
+      </template>
+      <van-button size="small" type="primary" data-test="empty-action" @click="goCatalog">
+        去预约
+      </van-button>
+    </van-empty>
 
     <van-cell-group v-else inset>
       <van-cell

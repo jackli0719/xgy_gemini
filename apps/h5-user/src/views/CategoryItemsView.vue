@@ -9,12 +9,15 @@
  * 「去预约」跳到 /order/new?itemId=&slotId=。
  * 只带 id：下单页会自己按 itemId 去接口查服务项名，
  * 不采信 query 里传的名称（query 是客户端可控的）。
+ *
+ * 三种页面状态（UI-01）：骨架屏 / 出错（有重试）/ 空数据（有引导按钮）。
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { api } from "@/api";
 import { todayStr } from "@/utils/date";
+import { errorMessage } from "@/utils/error";
 import type { components } from "@oto/shared/api";
 
 type ServiceItemSummary = components["schemas"]["ServiceItemSummary"];
@@ -50,7 +53,7 @@ async function load(): Promise<void> {
     );
     slotsByItem.value = Object.fromEntries(pairs);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : "服务项加载失败";
+    error.value = errorMessage(err, "服务项加载失败");
   } finally {
     loading.value = false;
   }
@@ -70,6 +73,11 @@ function book(item: ServiceItemSummary, slot: SlotAvailability): void {
     },
   });
 }
+
+/** 空状态里给一条出路：回到品类列表换个品类看看。 */
+function backToCatalog(): void {
+  void router.push("/catalog");
+}
 </script>
 
 <template>
@@ -82,9 +90,25 @@ function book(item: ServiceItemSummary, slot: SlotAvailability): void {
       @change="load"
     />
 
-    <van-loading v-if="loading" size="24" data-test="loading">加载中</van-loading>
-    <p v-else-if="error" class="page-error" data-test="error">{{ error }}</p>
-    <van-empty v-else-if="items.length === 0" description="该品类下暂无服务项" />
+    <div v-if="loading" data-test="skeleton">
+      <van-skeleton title :row="4" />
+    </div>
+
+    <div v-else-if="error" class="page-block" data-test="error-block">
+      <p class="page-error" data-test="error">{{ error }}</p>
+      <van-button size="small" plain type="primary" data-test="retry" @click="load">
+        重试
+      </van-button>
+    </div>
+
+    <van-empty v-else-if="items.length === 0" data-test="empty">
+      <template #description>
+        <span data-test="empty-text">该品类下暂时没有可预约的服务项</span>
+      </template>
+      <van-button size="small" type="primary" data-test="empty-action" @click="backToCatalog">
+        返回品类列表
+      </van-button>
+    </van-empty>
 
     <van-cell-group v-else inset>
       <van-cell v-for="item in items" :key="item.id" data-test="item-card">

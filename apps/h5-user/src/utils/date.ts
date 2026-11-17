@@ -17,3 +17,21 @@ export { BUSINESS_TIME_ZONE };
 export function todayStr(now: Date = new Date()): string {
   return formatBusinessDate(now);
 }
+
+/**
+ * 把 YYYY-MM-DD 往后挪若干天。
+ *
+ * 用 UTC 做加减：这个字符串只有日期没有时刻，
+ * 走本地时区的话在 CI（UTC）和国内用户的电脑上会差一天。
+ *
+ * 格式不对就原样返回——调用方拿到的是一个能继续用的日期字符串，
+ * 比抛异常好（页面上最多显示一个没变化的日期）。
+ */
+export function shiftDate(dateStr: string, days: number): string {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!matched) return dateStr;
+  const [, year, month, day] = matched;
+  const shifted = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted.toISOString().slice(0, 10);
+}
