@@ -56,13 +56,21 @@ def test_contract_timezone_matches_settings() -> None:
 
 
 def test_invalid_timezone_is_rejected_at_startup() -> None:
-    """时区名写错直接拒绝启动，不等到运行时才报 zoneinfo 的 KeyError。"""
-    with pytest.raises(ValidationError):
+    """时区名写错直接拒绝启动，不等到运行时才报 zoneinfo 的 KeyError。
+
+    这里必须显式配 app_env / login_sms_code：默认值（app_env=prod、
+    login_sms_code=123456）会被配置层的占位值守卫先拦下，
+    报错的就不是时区那条了——这个用例就白测了。
+    """
+    with pytest.raises(ValidationError) as exc:
         Settings(
+            app_env="dev",
             database_url="postgresql+asyncpg://u:p@localhost:5432/db",
             jwt_secret="x" * 40,
+            login_sms_code="aB3xY9zQ7mK2",
             timezone="Asia/ShangHai",
         )
+    assert "TIMEZONE" in str(exc.value)
 
 
 # ------------------------------------------------------------ 「今天」
