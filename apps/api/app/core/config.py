@@ -2,10 +2,14 @@
 
 根目录 .env 由 `cp .env.example .env` 生成，不入库。
 """
+from __future__ import annotations
+
+import re
 from pathlib import Path
+from typing import Self
 from zoneinfo import ZoneInfo
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # apps/api/app/core/config.py -> 上溯 4 层到仓库根目录
@@ -26,6 +30,47 @@ DEV_LOGIN_SMS_CODE = "123456"
 # 8 位是「猜不出来」的最低门槛：再短就基本等于没设。
 MIN_LOGIN_SMS_CODE_LENGTH = 8
 
+# 「还没填」的占位标记。
+#
+# .env.example 里所有待填的位置都写着 REPLACE_WITH_...；照抄成 .env
+# 又忘了改，就等于把「待填」的值带上线。CHANGE_ME 是同一类约定，一并拦。
+#
+# 拦在启动期：应用宁可起不来，也不要带着占位值跑起来——
+# 那样出了问题没人知道是配置没填。
+PLACEHOLDER_MARKERS = ("REPLACE_WITH", "CHANGE_ME")
+
+# .env.example 里 DATABASE_URL 这类值用的是尖括号写法：
+#   postgresql+asyncpg://<user>:<password>@<host>:5432/<db>
+# 这类不写 REPLACE_WITH，光靠标记拦不住。
+#
+# 只认这几个「一看就是占位」的词：真密码里带尖括号（a<b）不是没有可能，
+# 但 <user> / <password> 这种不会出现在真实配置里。
+PLACEHOLDER_ANGLE_RE = re.compile(
+    r"<(?:user|password|passwd|pwd|host|hostname|port|db|database|secret|key|token)>",
+    re.IGNORECASE,
+)
+
+# 整串就是这些值的，也是占位值（dev 的默认短信码 123456 就是这种）。
+#
+# 只比「整串相等」，不做子串匹配：JWT 密钥、库密码里偶然出现 123456
+# 是正常的随机串的一部分，不该被当成占位值。
+PLACEHOLDER_LITERAL_VALUES = (DEV_LOGIN_SMS_CODE,)
+
+
+def placeholder_reason(value: str) -> str | None:
+    """这个配置值是不是占位值？是的话返回一句话理由，不是返回 None。
+
+    给启动期校验和 JWT 长度校验共用一份判定，免得两处口径不一样。
+    """
+    for marker in PLACEHOLDER_MARKERS:
+        if marker in value:
+            return "含占位标记 {}".format(marker)
+    if PLACEHOLDER_ANGLE_RE.search(value):
+        return "含尖括号占位"
+    if value in PLACEHOLDER_LITERAL_VALUES:
+        return "还是占位值 {}".format(value)
+    return None
+
 
 class Settings(BaseSettings):
     """从环境变量 / 根目录 .env 读取的配置项。"""
@@ -34,6 +79,13 @@ class Settings(BaseSettings):
         env_file=ROOT_DIR / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # 报错时不回显输入值。
+        #
+        # pydantic 默认会把「这次校验拿到的全部输入」拼进错误信息，
+        # 这里面的 DATABASE_URL 带库密码、JWT_SECRET 带密钥——
+        # 启动失败打一行日志，等于把生产密钥写进日志文件。
+        # 隐藏输入值后错误信息只剩我们自己写的那句话（点名是哪个变量坏了）。
+        hide_input_in_errors=True,
     )
 
     database_url: str
@@ -73,6 +125,46 @@ class Settings(BaseSettings):
     # 默认 Asia/Shanghai：面向国内用户。存库时间戳仍是 UTC（timestamptz），
     # 只在「取业务日期」的那一处换算（见 app/core/timezone.py）。
     timezone: str = "Asia/Shanghai"
+
+    @model_validator(mode="after")
+    def _check_no_placeholder_values(self) -> Self:
+        """生产环境不许带着占位值启动。
+
+        拦的是「.env 没填完就上线」：里面还留着 REPLACE_WITH_...、
+        CHANGE_ME_...、<user> 这类尖括号写法，或者短信验证码还是 dev 的 123456。
+
+        为什么用 model_validator(mode="after") 而不是字段校验器：
+        - 要拿到**最终值**：环境里没配的字段取的是代码里的默认值
+          （例如 LOGIN_SMS_CODE 的默认值 123456），默认值得一并扫。
+        - 要**一次列出所有**占位项：字段校验器逐个字段跑，
+          第一个不合法就抛，后面的字段根本看不到——
+          运维得改一个、重启一次、再改下一个。这里一行日志就能照着改完。
+
+        为什么只在非 dev 环境拦：本地开发就是要能拿占位值跑起来
+        （同 _check_login_sms_code 的口径）。
+        """
+        app_env = self.app_env.strip().lower()
+        if app_env == "dev":
+            return self
+
+        offenders: list[str] = []
+        for name, value in self:
+            if not isinstance(value, str) or not value:
+                continue
+            reason = placeholder_reason(value)
+            if reason is not None:
+                # 只报**字段名和原因**，不报值本身：值可能是密钥。
+                offenders.append("{}（{}）".format(name.upper(), reason))
+
+        if offenders:
+            raise ValueError(
+                "APP_ENV={} 时以下配置项还是占位值，拒绝启动：{}。"
+                "请按 .env.example 逐项替换成真实值"
+                "（清单见 docs/PRODUCTION_CHECKLIST.md）。".format(
+                    app_env, "；".join(offenders)
+                )
+            )
+        return self
 
     @field_validator("timezone")
     @classmethod
@@ -151,6 +243,9 @@ class Settings(BaseSettings):
         """密钥太短 -> 启动失败，不等到运行时才报警。
 
         校验的是字节长度不是字符数：非 ASCII 字符一个顶多个字节。
+
+        dev 也一样卡：占位密钥（.env.example 那串）本来就够长，
+        短的是「自己配小了」，那在任何环境都不该放行。
         """
         length = len(value.encode("utf-8"))
         if length < JWT_SECRET_MIN_BYTES:
