@@ -2,7 +2,8 @@
 
 上线前逐条过一遍。**每条都有验证命令**：命令输出符合预期才往下走。
 第 3 条是总闸——`app/core/config.py` 在启动期就会拒绝带占位值的配置，
-它过了基本就说明 `.env` 填完了。
+它过了说明 `Settings` 里的配置项都填完了；
+但 `POSTGRES_*` / `REDIS_*` 不在 `Settings` 里，仍要靠第 2、6 条人工核对。
 
 前置：仓库根目录有 `.env`（`cp .env.example .env` 生成的，不入库）。
 
@@ -18,11 +19,17 @@ grep '^APP_ENV=' .env          # 期望：APP_ENV=prod
 
 ## 2. 占位值自查
 
-`.env` 里不能残留 `REPLACE_WITH` / `CHANGE_ME` / `<user>` 这类示例值。
+`.env` 里不能残留 `REPLACE_WITH` / `CHANGE_ME` / 任何尖括号写法这类示例值。
+`.env.example` 里的占位有中英文两种写法（`<user>` 和 `<数据库用户名>`），
+所以按「尖括号」整体匹配，不要只列几个英文词。
 
 ```bash
-grep -nE 'REPLACE_WITH|CHANGE_ME|<user>|<password>|<host>|<db>' .env   # 期望：无输出
+grep -nE 'REPLACE_WITH|CHANGE_ME|<[^>]+>' .env   # 期望：无输出
 ```
+
+> 注意：`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `REDIS_PASSWORD`
+> **不在 `Settings` 里**，启动期的占位守卫扫不到它们，只能靠这一条人工核对。
+> 漏掉的后果：容器照样起得来，起来连的是错的库或空密码。
 
 ## 3. 启动自检（总闸）
 
@@ -51,10 +58,11 @@ python -c "import pathlib;v=[l.split('=',1)[1].strip() for l in pathlib.Path('.e
 
 ## 6. 数据库与缓存地址
 
-`DATABASE_URL` / `REDIS_URL` 指向生产实例，密码是真实值。
+`DATABASE_URL` / `REDIS_URL` / `POSTGRES_*` 指向生产实例，密码是真实值。
 
 ```bash
-grep -E '^(DATABASE_URL|REDIS_URL)=' .env | sed 's#://[^@]*@#://***@#'   # 期望：主机名/库名是生产值，密码已被遮住
+grep -E '^(DATABASE_URL|REDIS_URL|POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DB)=' .env \
+  | sed 's#://[^@]*@#://***@#' | sed 's#\(PASSWORD=\).*#\1***#'   # 期望：主机名/库名是生产值，密码已被遮住
 ```
 
 ## 7. `.env` 不入库
