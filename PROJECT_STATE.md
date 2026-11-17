@@ -68,9 +68,10 @@
 
 ## 当前 commit
 
-- 本分支：`feature/FE-06b-master-review` —— 本地提交，**未 push、未开 PR**。
-- 分支提交序列：FE-06b 平台侧入驻审核页（审核页 + 路由/菜单 + SDK 两个方法 + 测试）。最新哈希见 `git log -1`。
-- `main` HEAD：`19d5de7 feat(FE-06a): master onboarding apply page (#9)`
+- 本分支：`fix/DEPLOY-01-checklist-greps` —— DEPLOY-01 合并后的清单修补，本地提交，**未 push、未开 PR**。
+- 修补内容：`docs/PRODUCTION_CHECKLIST.md` 第 2 / 6 条的 grep 漏了中文尖括号占位
+  （`POSTGRES_USER=<数据库用户名>` 这类），照抄 `.env.example` 的 `.env` 会「假通过」。
+- `main` HEAD：`19f9adc feat(DEPLOY-01): prod config placeholder guard + production checklist (#11)`
 - 本文件自身的提交见 `git log -1`（也在这个分支上，随 PR 一起合并）。
 
 ## CI 现状
