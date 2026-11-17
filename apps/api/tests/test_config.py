@@ -280,3 +280,19 @@ def test_short_placeholder_secret_error_has_no_value_echo() -> None:
     message = str(exc.value)
     assert "REPLACE_WITH_xxx" not in message
     assert "JWT_SECRET" in message
+
+
+def test_prod_rejects_whole_value_placeholder_literal() -> None:
+    """整个值就是占位字面量 123456 的字段，也得拒。
+
+    短信码那条已经被 _check_login_sms_code 拦了（那是一道更早的关），
+    但别的字段取到 123456 只剩这一条能拦——所以它单独有用。
+    """
+    with pytest.raises(ValueError) as exc:
+        Settings(
+            app_env="prod",
+            database_url="123456",
+            jwt_secret=REAL_SECRET,
+            login_sms_code="aB3xY9zQ7mK2",
+        )
+    assert "DATABASE_URL" in str(exc.value)
