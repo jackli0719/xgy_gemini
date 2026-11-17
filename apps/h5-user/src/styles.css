@@ -92,3 +92,10 @@ body {
 .hint-tag {
   font-size: 11px;
 }
+
+/* 待确认订单的提示：这一单在等用户点确认，红字小字点出来。 */
+.pending-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: #ee0a24;
+}

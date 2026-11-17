@@ -8,6 +8,9 @@ import { describe, expect, it } from "vitest";
 
 import { setupApp } from "./helpers";
 
+// 超时从默认的 5s 放宽到 10s：这几个用例都要等懒加载的路由 chunk
+// （登录页 / 业务页）真正拉下来。满负荷跑整套时，冷启动 + 转译要把
+// 3.5s 拉到 5s 以上，5s 上限会偶发翻车——测试本身是绿的，只是慢。
 describe("路由守卫", () => {
   it("没有 token 时跳到登录页", async () => {
     const { router } = await setupApp("/orders", { token: "" });
@@ -28,4 +31,4 @@ describe("路由守卫", () => {
 
     expect(router.currentRoute.value.path).toBe("/login");
   });
-});
+}, 10000);
