@@ -98,6 +98,13 @@ export function buildRoutes(pinia: Pinia): RouteRecordRaw[] {
       // 品类管理（含改价）：平台管理员与平台运营都能管
       meta: { requiresRoles: [...PLATFORM_ROLES] },
     },
+    {
+      path: "/platform/masters/review",
+      name: "platform-master-review",
+      component: () => import("@/views/PlatformMasterReviewView.vue"),
+      // 师傅入驻审核：只有平台管理员能审（后端同一个角色门槛）
+      meta: { requiresRoles: [PLATFORM_ADMIN] },
+    },
   ];
 }
 

@@ -68,6 +68,18 @@ function logout(): void {
           >
             品类管理
           </router-link>
+          <!--
+            入驻审核：只有平台管理员能审（跟「服务商管理」一样）。
+            运营 / 财务点进去只会拿到 403，所以不给他们显示。
+          -->
+          <router-link
+            v-if="session.isPlatformAdmin"
+            class="app-nav-link"
+            data-test="platform-master-review-link"
+            to="/platform/masters/review"
+          >
+            入驻审核
+          </router-link>
         </template>
         <!--
           结算确认：平台财务与平台管理员看得到。

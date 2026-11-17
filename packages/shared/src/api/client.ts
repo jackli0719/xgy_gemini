@@ -130,6 +130,8 @@ type UpdatePlatformItemOp = operations["update_platform_item_api_v1_platform_ite
 type ListJoinableProvidersOp = operations["list_joinable_providers_api_v1_masters_joinable_providers_get"];
 type SubmitOnboardingOp = operations["submit_onboarding_api_v1_masters_onboarding_post"];
 type GetMyOnboardingOp = operations["get_my_onboarding_api_v1_masters_onboarding_get"];
+type ListPlatformOnboardingApplicationsOp = operations["list_onboarding_applications_api_v1_platform_masters_get"];
+type ReviewMasterOnboardingOp = operations["review_onboarding_api_v1_platform_masters__master_id__review_post"];
 
 
 /** 从错误响应体里挑出文案。 */
@@ -521,6 +523,54 @@ export function createApiClient(options: ApiClientOptions = {}) {
       return send<CreatePlatformProviderAdminOp>(
         "POST",
         `/api/v1/platform/providers/${encodeURIComponent(String(params.provider_id))}/admin`,
+        { body },
+      );
+    },
+
+    // -----------------------------------------------------------------
+    // 平台侧：师傅入驻审核
+    //
+    // 只有 PLATFORM_ADMIN 能调（服务端按 token 里的角色判）。
+    // 「审哪一位师傅」是路径参数（master_id）——**师傅 id**，
+    // 别与服务商 id（provider_id）混淆。
+    // -----------------------------------------------------------------
+
+    /**
+     * 师傅入驻申请列表（平台侧）。
+     *
+     * `status` 省略表示全部（不限待审核）；审核页一般传 `PENDING`。
+     */
+    listPlatformOnboardingApplications(
+      params: QueryParamsOf<ListPlatformOnboardingApplicationsOp> = {},
+    ): Promise<ResponseOf<ListPlatformOnboardingApplicationsOp>> {
+      return send<ListPlatformOnboardingApplicationsOp>("GET", "/api/v1/platform/masters", {
+        query: {
+          status: params.status ?? undefined,
+          page: params.page,
+          limit: params.limit,
+        },
+      });
+    },
+
+    /**
+     * 审核一份入驻申请（通过 / 驳回）。
+     *
+     * 请求体三选二：
+     * - 通过：`decision: "APPROVE"`，可选 `target_provider_id` 改判服务商
+     *   （不传则沿用申请里选的那家）；
+     * - 驳回：`decision: "REJECT"` + `reason`（驳回理由写进审计日志）。
+     *
+     * **请求体里没有 provider_id**：归属由平台确认，不是客户端自报的东西
+     * （全仓 openapi 契约测试也禁止该字段名）。
+     * 申请不存在 / 已不在待审核状态 -> 404。
+     */
+    reviewMasterOnboarding(
+      params: PathParamsOf<ReviewMasterOnboardingOp>,
+      body: RequestBodyOf<ReviewMasterOnboardingOp>,
+    ): Promise<ResponseOf<ReviewMasterOnboardingOp>> {
+      return send<ReviewMasterOnboardingOp>(
+        "POST",
+        `/api/v1/platform/masters/${encodeURIComponent(String(params.master_id))}/review`,
         { body },
       );
     },

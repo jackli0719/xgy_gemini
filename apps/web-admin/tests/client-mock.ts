@@ -43,4 +43,10 @@ export const mockClient = {
   createPlatformItem: vi.fn(),
   /** PATCH /api/v1/platform/items/{item_id} */
   updatePlatformItem: vi.fn(),
+  /** GET /api/v1/platform/masters（师傅入驻申请列表） */
+  listPlatformOnboardingApplications: vi.fn(),
+  /** POST /api/v1/platform/masters/{master_id}/review（入驻审核） */
+  reviewMasterOnboarding: vi.fn(),
+  /** GET /api/v1/masters/joinable-providers（可改判的服务商） */
+  listJoinableProviders: vi.fn(),
 };
