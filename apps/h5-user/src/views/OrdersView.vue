@@ -62,6 +62,16 @@ function open(orderNo: string): void {
 function goCatalog(): void {
   void router.push("/catalog");
 }
+
+/**
+ * 待确认的单要更醒目。
+ *
+ * 这一单在等**用户**点「确认完成」——列表里就是用户的待办，
+ * 混在一堆「待派单 / 待接单」里容易被划过去。
+ */
+function isPendingConfirm(item: OrderListItem): boolean {
+  return item.status === "PENDING_CONFIRM";
+}
 </script>
 
 <template>
@@ -107,9 +117,21 @@ function goCatalog(): void {
         <template #value>
           <div class="order-value">
             <span class="order-amount">¥{{ order.amount }}</span>
-            <van-tag type="primary" plain>
+            <van-tag
+              :type="isPendingConfirm(order) ? 'warning' : 'primary'"
+              :plain="!isPendingConfirm(order)"
+              data-test="order-status"
+            >
               {{ ORDER_STATUS_TEXT[order.status] }}
             </van-tag>
+            <!-- 待确认的行在等用户点确认，列表里要点出来 -->
+            <span
+              v-if="isPendingConfirm(order)"
+              class="pending-hint"
+              data-test="pending-hint"
+            >
+              服务已完成，请确认
+            </span>
           </div>
         </template>
       </van-cell>
