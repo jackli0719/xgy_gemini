@@ -112,6 +112,9 @@ class MasterOrderRow:
     slot_start_time: time
     slot_end_time: time
     created_at: datetime
+    # 完成时间：客户确认完成（或自动确认）时才写，没完成就是空。
+    # 详情响应把它带给师傅；列表响应不用（列表 schema 里没有这个字段）。
+    completed_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -313,6 +316,7 @@ def _order_select():
         ScheduleSlot.start_time,
         ScheduleSlot.end_time,
         Order.created_at,
+        Order.completed_at,
     ).join(
         ServiceItem, ServiceItem.id == Order.item_id
     ).join(

@@ -35,15 +35,19 @@ const error = ref("");
 const confirming = ref(false);
 /** 确认失败的原因（后端原话）。 */
 const confirmError = ref("");
-/** 完成时间。确认接口的响应里有，详情接口没有（后端 OrderDetail 不含这个字段）。 */
-const completedAt = ref("");
 
 /** 待确认才给「确认完成」按钮（其他状态不给，免得用户点出 409）。 */
 const canConfirm = computed(() => order.value?.status === "PENDING_CONFIRM");
 
-/** 完成时间按业务时区显示（跟后端存的口径一致）。 */
+/**
+ * 完成时间按业务时区显示（跟后端存的口径一致）。
+ *
+ * 值来自**订单详情接口**的 completed_at（后端 UI-02b 起给），
+ * 不再从确认接口的响应里拿——那样只有「刚点完确认」的那一次才有值，
+ * 直接打开一个早已完成的订单会看不到完成时间。
+ */
 const completedAtText = computed(() =>
-  completedAt.value ? formatBusinessDateTime(completedAt.value) : "",
+  order.value?.completed_at ? formatBusinessDateTime(order.value.completed_at) : "",
 );
 
 onMounted(load);
@@ -85,9 +89,9 @@ async function confirmDone(): Promise<void> {
   confirmError.value = "";
   try {
     const result = await api.confirmService({ order_no: orderNo.value });
-    completedAt.value = result.completed_at ?? "";
     // 先用响应把本地状态改成 COMPLETED：按钮立刻消失，
     // 不用干等详情刷新回来（刷新失败也不该把按钮留在那儿让人再点一次）。
+    // 完成时间不取这里的响应——详情接口自己会给 completed_at（见 load）。
     if (order.value) {
       order.value = { ...order.value, status: result.status };
     }

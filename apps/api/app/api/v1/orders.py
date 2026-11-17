@@ -229,4 +229,5 @@ async def get_my_order(
         slot_end_time=row.slot_end_time,
         address_id=row.address_id,
         created_at=row.created_at,
+        completed_at=row.completed_at,
     )

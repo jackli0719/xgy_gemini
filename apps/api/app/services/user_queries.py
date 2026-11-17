@@ -121,6 +121,9 @@ class OrderRow:
     slot_end_time: time
     address_id: int
     created_at: datetime
+    # 完成时间：客户确认完成（或自动确认）时才写，没完成就是空。
+    # 详情接口把它带给前端，列表接口不用（列表 schema 里没有这个字段）。
+    completed_at: datetime | None
 
 
 def today() -> date:
@@ -404,6 +407,7 @@ def _order_select():
         ScheduleSlot.end_time,
         Order.address_id,
         Order.created_at,
+        Order.completed_at,
     ).join(
         ServiceItem, ServiceItem.id == Order.item_id
     ).join(

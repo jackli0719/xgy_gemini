@@ -7,8 +7,8 @@
  * 3. 确认 409（状态已变）显示提示并刷新最新状态，不白屏；
  * 4. 订单列表里 PENDING_CONFIRM 的行有醒目提示。
  *
- * 完成时间是**确认接口的响应**给的（ServiceFlowResult.completed_at）——
- * 详情接口的 OrderDetail 里没有这个字段，所以页面把它单独存一份。
+ * 完成时间是**订单详情接口**给的（OrderDetail.completed_at，UI-02b 起）——
+ * 页面直接读订单数据里的这个字段，不再从确认接口的响应里兜。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,7 +32,7 @@ const ORDER_NO = "OTO2026010100001";
 /** 完工时间（UTC）。业务时区是 Asia/Shanghai，所以显示成 2026-01-01 10:30。 */
 const COMPLETED_AT = "2026-01-01T02:30:00Z";
 
-function orderDetail(status: string) {
+function orderDetail(status: string, completedAt: string | null = null) {
   return {
     id: 1,
     order_no: ORDER_NO,
@@ -47,6 +47,7 @@ function orderDetail(status: string) {
     slot_end_time: "11:00:00",
     address_id: 1,
     created_at: "2026-01-01T00:00:00Z",
+    completed_at: completedAt,
   };
 }
 
@@ -117,10 +118,10 @@ describe("UI-02 确认完成", () => {
   });
 
   it("确认成功后状态刷新为 COMPLETED，按钮消失并显示完成时间", async () => {
-    // 第一次拿到待确认，确认后刷新拿到已完成
+    // 第一次拿到待确认，确认后刷新拿到已完成（带完成时间）
     mockClient.getMyOrder
       .mockResolvedValueOnce(orderDetail("PENDING_CONFIRM"))
-      .mockResolvedValue(orderDetail("COMPLETED"));
+      .mockResolvedValue(orderDetail("COMPLETED", COMPLETED_AT));
 
     const wrapper = await mountDetail();
     await wrapper.find('[data-test="confirm-button"]').trigger("click");
@@ -138,7 +139,7 @@ describe("UI-02 确认完成", () => {
     );
     mockClient.getMyOrder
       .mockResolvedValueOnce(orderDetail("PENDING_CONFIRM"))
-      .mockResolvedValue(orderDetail("COMPLETED"));
+      .mockResolvedValue(orderDetail("COMPLETED", COMPLETED_AT));
 
     const wrapper = await mountDetail();
     await wrapper.find('[data-test="confirm-button"]').trigger("click");
@@ -187,6 +188,28 @@ describe("UI-02 确认完成", () => {
     // 不白屏：订单内容还在，确认按钮也还在（能重试）
     expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="confirm-button"]').exists()).toBe(true);
+  });
+
+  it("直接打开已完成的订单就能看到完成时间（不靠确认接口的响应）", async () => {
+    // 首屏就是已完成：详情接口自己带回 completed_at
+    mockClient.getMyOrder.mockResolvedValue(orderDetail("COMPLETED", COMPLETED_AT));
+
+    const wrapper = await mountDetail();
+
+    expect(wrapper.find('[data-test="order-status"]').text()).toContain("已完成");
+    expect(wrapper.find('[data-test="completed-at"]').text()).toContain("2026-01-01 10:30");
+    // 早就完成、不是刚点完确认的：页面上一开始就有完成时间
+    expect(mockClient.confirmService).not.toHaveBeenCalled();
+  });
+
+  it("没完成的订单不显示完成时间", async () => {
+    mockClient.getMyOrder.mockResolvedValue(orderDetail("IN_SERVICE"));
+
+    const wrapper = await mountDetail();
+
+    expect(wrapper.find('[data-test="completed-at"]').exists()).toBe(false);
+    // 订单内容照旧在页面上（没白屏）
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
 
   it("订单列表里待确认的行有醒目提示，其他状态没有", async () => {
