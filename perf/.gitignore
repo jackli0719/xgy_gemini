@@ -1,0 +1,6 @@
+# 种子生成的「种子 ↔ k6」契约：每次重新种子都会变，不入库
+manifest.json
+
+# 压测结果（summary json）
+out/*
+!out/.gitkeep

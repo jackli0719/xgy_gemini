@@ -1,0 +1,143 @@
+# OTO 压测栈 —— 与开发栈 / 测试栈完全隔离的一套容器。
+#
+# 隔离边界（这是这张卡的核心约束）：
+#
+# - **独立容器**：perf-postgres / perf-redis 都不在 oto-dev 网络里，
+#   与开发栈的 oto-postgres、开发库 oto、测试库 oto_test 没有任何共享。
+# - **独立库名**：压测库固定叫 oto_perf，连的是自己的 postgres 容器，
+#   不是开发库。perf/seed.py 里还有一道硬闸：库名不以 _perf 结尾就拒绝执行。
+#
+# 用法（都从仓库根跑，路径用 -f 指定）：
+#
+#   make perf-up      起 postgres + redis + api（api 用迁移建库）
+#   make perf-seed    往压测库种数据（写 perf/manifest.json）
+#   make perf-run     跑 k6 两组压测（竞态 + 负载）
+#   make perf-down    拆掉整套（含数据卷）
+#
+# 端口：宿主机 54322（postgres）/ 8101（api）。都跟开发栈错开，
+# 本机 5432 / 8000 被别的项目占着也不影响。
+name: oto-perf
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oto-perf-postgres
+    environment:
+      # 压测栈自己一套账号，不复用开发栈的
+      POSTGRES_USER: ${PERF_POSTGRES_USER:-oto}
+      POSTGRES_PASSWORD: ${PERF_POSTGRES_PASSWORD:-oto}
+      # 库名固定 oto_perf
+      POSTGRES_DB: oto_perf
+    # 默认 max_connections=100 顶不住多 worker 的连接池
+    # （4 worker x 30 条 = 120 条），压测栈自己放宽
+    command: ["postgres", "-c", "max_connections=300"]
+    volumes:
+      - perfpgdata:/var/lib/postgresql/data
+    ports:
+      - "${PERF_POSTGRES_PORT:-54322}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PERF_POSTGRES_USER:-oto} -d oto_perf"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - oto-perf
+
+  redis:
+    image: redis:7-alpine
+    container_name: oto-perf-redis
+    volumes:
+      - perfredisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    networks:
+      - oto-perf
+
+  api:
+    # 复用测试镜像（python 3.11 + 依赖齐全），只是换个启动命令。
+    # 源码挂载：改后端代码不必重建镜像。
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile.test
+    image: oto-perf-api:latest
+    container_name: oto-perf-api
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      # 多 worker：单进程是单核 CPU 瓶颈（实测 ~220 req/s 就打满了），
+      # 压测要量的是应用在正常服务形态下的表现，不是单核天花板。
+      # worker 数可用 PERF_API_WORKERS 改。
+      - --workers
+      - "${PERF_API_WORKERS:-4}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 连的是压测库 oto_perf，不是开发库
+      DATABASE_URL: postgresql+asyncpg://${PERF_POSTGRES_USER:-oto}:${PERF_POSTGRES_PASSWORD:-oto}@postgres:5432/oto_perf
+      REDIS_URL: redis://redis:6379/0
+      # 本地压测栈专用的临时密钥，不是任何环境的真密钥；
+      # 生产密钥永远不进仓库（.env 不入库）。
+      JWT_SECRET: ${PERF_JWT_SECRET:-perf-stack-local-only-not-a-real-secret-0123456789}
+      JWT_ALG: ${JWT_ALG:-HS256}
+      # dev：mock 支付接口开放；验证码用固定值（压测不需要短信）
+      APP_ENV: dev
+      LOGIN_SMS_CODE: ${PERF_SMS_CODE:-123456}
+      TIMEZONE: Asia/Shanghai
+      # 连接池：每个 worker 一份池（pool_size + max_overflow=10）。
+      # worker 数 x 30 条不能超过 postgres 的 max_connections（上面放到 300）。
+      DB_POOL_SIZE: ${PERF_DB_POOL_SIZE:-20}
+      AUTO_CONFIRM_THRESHOLD_HOURS: 24
+      LOG_LEVEL: WARNING
+    volumes:
+      - ../apps/api:/app/apps/api
+      - ../packages:/app/packages
+      # perf 目录挂进容器：种子脚本与 manifest 都在这儿
+      - .:/app/perf
+    ports:
+      - "${PERF_API_PORT:-8101}:8000"
+    networks:
+      - oto-perf
+
+  # k6 只在跑压测时用（make perf-run），平时不起
+  k6:
+    image: grafana/k6:latest
+    container_name: oto-perf-k6
+    profiles: ["run"]
+    depends_on:
+      - api
+    environment:
+      # 走 compose 内部网络，不绕宿主机端口
+      BASE_URL: http://api:8000
+      SMS_CODE: ${PERF_SMS_CODE:-123456}
+    volumes:
+      # manifest.json 与压测脚本都在这儿；压测结果写回 perf/out/
+      - .:/perf
+    working_dir: /perf
+    # 用 entrypoint 覆盖：k6 官方镜像的 entrypoint 是 k6
+    entrypoint: ["k6"]
+    command: ["run", "/perf/k6/race.js"]
+    networks:
+      - oto-perf
+
+networks:
+  oto-perf:
+    name: oto-perf
+    driver: bridge
+
+volumes:
+  perfpgdata:
+    name: oto-perf-pgdata
+  perfredisdata:
+    name: oto-perf-redisdata
