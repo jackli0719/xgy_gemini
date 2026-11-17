@@ -9,11 +9,16 @@
   这里只是调普通的列表 / 修改接口。
 
   状态标签用 el-tag 区分颜色：一眼能看出谁在岗、谁休假、谁被停用。
+
+  UI-03 打磨的重点：
+  - 空状态：一句「暂无师傅」+ 刷新按钮，不是一张空表；
+  - 状态切换中：按钮显示 loading 并禁用，连点只改一次。
 -->
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import {
   ElButton,
+  ElEmpty,
   ElMessage,
   ElTable,
   ElTableColumn,
@@ -80,6 +85,10 @@ async function load(): Promise<void> {
 }
 
 async function toggleStatus(row: ProviderMasterItem): Promise<void> {
+  // 同步守卫：改状态请求在途时再点一次直接返回，
+  // 免得同一个师傅连发两次 PATCH（第二次多半是 409）。
+  if (changing.value !== null) return;
+
   const next = row.status === "ACTIVE" ? "DISABLED" : "ACTIVE";
   changing.value = row.id;
   try {
@@ -110,7 +119,20 @@ onMounted(() => {
 
     <p v-if="errorText" class="error-text" data-test="error">{{ errorText }}</p>
 
-    <el-table v-loading="loading" :data="masters" border stripe>
+    <!-- 空状态：一句人话 + 一个刷新按钮，不是一张空表让人猜 -->
+    <div
+      v-if="!loading && !errorText && masters.length === 0"
+      class="empty-block"
+      data-test="masters-empty"
+    >
+      <el-empty description="暂无师傅">
+        <el-button data-test="masters-empty-refresh" @click="load">
+          刷新
+        </el-button>
+      </el-empty>
+    </div>
+
+    <el-table v-else v-loading="loading" :data="masters" border stripe>
       <el-table-column prop="real_name" label="姓名" min-width="140" />
       <el-table-column prop="phone" label="手机号" min-width="140" />
       <el-table-column label="评分" width="100" align="right">
@@ -137,6 +159,7 @@ onMounted(() => {
             link
             data-test="toggle-btn"
             :loading="changing === row.id"
+            :disabled="changing !== null"
             @click="toggleStatus(row as ProviderMasterItem)"
           >
             {{ toggleLabel(row.status) }}
