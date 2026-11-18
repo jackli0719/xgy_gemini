@@ -1,7 +1,7 @@
 # OTO 项目状态（交接文档）
 
 > 一页快照：给下一个接手的人看。**每张卡合并时同步更新本文件**（见「协作规则」）。
-> 最后更新：2026-11-17
+> 最后更新：2026-11-18
 
 ## 架构
 
@@ -82,7 +82,7 @@
 ## CI 现状
 
 - **触发**：PR 到 `main`、push 到 `main` 各跑一遍；同 ref 新提交取消旧跑批。
-- **后端 job**：pytest 单元 + 集成分两轮跑；集成测试**不许静默 skip**；再单独数一遍收集到的集成用例数，低于 `EXPECTED_INTEGRATION_TESTS`（现 348）直接红。
+- **后端 job**：pytest 单元 + 集成分两轮跑；集成测试**不许静默 skip**；再单独数一遍收集到的集成用例数，低于 `EXPECTED_INTEGRATION_TESTS`（现 352）直接红。
 - **前端 job**：三个 workspace 各自 typecheck / test / build，矩阵展开成 3 个检查。
 - **最近结果**：PR #9（FE-06a 师傅端入驻申请页）绿（已合并进 `main`）；历史故意造红的验证 PR（#2）确实红过，门禁有效。
 - **Secrets**：`DATABASE_URL` / `TEST_DATABASE_URL` / `REDIS_URL` / `JWT_SECRET` / `POSTGRES_PASSWORD` 已配；`LOGIN_SMS_CODE` 未配（CI 里 `APP_ENV=dev`，走占位码）。

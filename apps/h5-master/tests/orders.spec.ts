@@ -9,6 +9,8 @@
  * 4. 开始服务：ACCEPTED 分组点「开始服务」-> 调 startService；
  * 5. UI-M1：三个分组各有自己的空状态文案、切换分组重新请求、
  *    接口 500 显示后端原话 + 重试按钮（且**不**同时显示空状态）。
+ * 6. UI-M1：切换分组有 loading——**再次进入已加载过的分组也会重新显示骨架屏**
+ *    （断言 van-skeleton 组件本身，不是包着它的外层 div）。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -199,14 +201,74 @@ describe("我的订单页（师傅端）", () => {
     const wrapper = mount(OrdersView, { global: { plugins: [pinia, router] } });
     await flushPromises();
 
-    expect(wrapper.find('[data-test="skeleton"]').exists()).toBe(true);
+    // 断言骨架屏组件本身（不是包着它的外层 div）
+    expect(wrapper.findComponent({ name: "van-skeleton" }).exists()).toBe(true);
     // 骨架屏期间不该同时冒出空状态或错误
     expect(wrapper.find('[data-test="empty-PENDING_ACCEPT"]').exists()).toBe(false);
 
     release({ items: [], total: 0, limit: 20, offset: 0 });
     await flushPromises();
 
-    expect(wrapper.find('[data-test="skeleton"]').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: "van-skeleton" }).exists()).toBe(false);
+  });
+
+  it("来回切到已加载过的分组 -> 骨架屏重新出现", async () => {
+    // 第二次进入「待服务」分组时把请求挂住，好观察中间的 loading 态
+    let acceptedCalls = 0;
+    let release: (value: unknown) => void = () => {};
+    mockClient.listMasterOrders.mockImplementation(
+      ({ status }: { status: string }) => {
+        if (status === "ACCEPTED") {
+          acceptedCalls += 1;
+          if (acceptedCalls > 1) {
+            return new Promise((resolve) => {
+              release = resolve;
+            });
+          }
+          return Promise.resolve({
+            items: ACCEPTED_ORDERS,
+            total: 1,
+            limit: 20,
+            offset: 0,
+          });
+        }
+        if (status === "IN_SERVICE") {
+          return Promise.resolve({ items: [], total: 0, limit: 20, offset: 0 });
+        }
+        return Promise.resolve({
+          items: PENDING_ORDERS,
+          total: 2,
+          limit: 20,
+          offset: 0,
+        });
+      },
+    );
+
+    const { pinia, router } = await setupApp("/orders");
+    const wrapper = mount(OrdersView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    // 第一次进「待服务」分组：加载完，能看到「开始服务」按钮
+    await wrapper.findAll(".van-tab")[1].trigger("click");
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-test="start-btn"]').exists()).toBe(true);
+    });
+
+    // 切回「待接单」再切回「待服务」：第二次进入要重新请求并回到 loading 态
+    await wrapper.findAll(".van-tab")[0].trigger("click");
+    await flushPromises();
+    await wrapper.findAll(".van-tab")[1].trigger("click");
+    await flushPromises();
+
+    // 骨架屏重新出现（断言组件本身，不是包着它的外层 div）
+    expect(wrapper.findComponent({ name: "van-skeleton" }).exists()).toBe(true);
+
+    // 请求回来后骨架屏撤掉，数据正常显示
+    release({ items: ACCEPTED_ORDERS, total: 1, limit: 20, offset: 0 });
+    await flushPromises();
+
+    expect(wrapper.findComponent({ name: "van-skeleton" }).exists()).toBe(false);
+    expect(wrapper.find('[data-test="start-btn"]').exists()).toBe(true);
   });
 
   it("三个分组空数据各显示自己的空状态", async () => {
