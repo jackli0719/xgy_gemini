@@ -13,6 +13,8 @@
 3. **归属写进 SQL 谓词**：订单查询永远带 ``Order.master_id == 我的 master_id``，
    「订单不存在」与「订单不是我的」共用同一个异常、同一句话（404 同构），
    调用方没法靠错误差异探测别人的订单存不存在、归谁。
+   列表里也带上门地址（师傅在路上就得看地址）——地址属于**这笔订单**，
+   而订单已经被这条谓词过滤过，所以不会外泄别人的地址。
 4. **分页有上限**：limit 收敛到 [1, MAX_PAGE_LIMIT]，offset 不为负，
    与用户侧订单列表（app.services.user_queries）同一套口径。
 5. **查询不按师傅状态过滤**：停用 / 休假的师傅照样能查自己的单。
@@ -99,7 +101,12 @@ class MasterIdentity:
 
 @dataclass(frozen=True)
 class MasterOrderRow:
-    """师傅端订单列表里的一笔订单（+ 服务项名称与预约时段）。"""
+    """师傅端订单列表里的一笔订单（+ 服务项名称、预约时段与上门地址）。
+
+    字段顺序 **必须** 与 ``_order_select()`` 的列顺序严格一致——
+    service 用位置参数构造（``MasterOrderRow(*row)``），
+    对不上就会把「服务项名称」当成「预约日期」塞进去。
+    """
 
     id: int
     order_no: str
@@ -115,20 +122,26 @@ class MasterOrderRow:
     # 完成时间：客户确认完成（或自动确认）时才写，没完成就是空。
     # 详情响应把它带给师傅；列表响应不用（列表 schema 里没有这个字段）。
     completed_at: datetime | None
+    # 上门地址：列表也要给（师傅在路上就得看地址）。
+    # 地址属于**这笔订单**，而订单已经按归属谓词过滤过
+    # （``Order.master_id == 我的 master_id``），所以不会外泄别人的地址。
+    address_region: str
+    address_detail: str
 
 
 @dataclass(frozen=True)
 class MasterOrderDetailRow(MasterOrderRow):
-    """订单详情：多了客户联系方式与上门地址。
+    """订单详情：多了客户联系方式。
 
-    地址与电话**只对承接这笔订单的师傅可见**——他得知道去哪儿上门。
+    联系方式**只对承接这笔订单的师傅可见**——他得知道找谁。
     可见范围由 ``Order.master_id == 我的 master_id`` 这条谓词保证。
+
+    地址在基类里（列表也带），这里只补联系方式；
+    字段顺序同样是「基类在前、子类在后」，与 ``_detail_select()`` 的列顺序对齐。
     """
 
     customer_contact: str
     customer_phone: str
-    address_region: str
-    address_detail: str
 
 
 @dataclass(frozen=True)
@@ -299,10 +312,13 @@ def _resolve_master_order_status(
 
 
 def _order_select():
-    """订单 + 服务项名称 + 时段信息的查询（列表用）。
+    """订单 + 服务项名称 + 时段信息 + 上门地址的查询（列表用）。
 
-    内连接：slot_id / item_id 都是外键且删除时 RESTRICT，
+    内连接：slot_id / item_id / address_id 都是外键且删除时 RESTRICT，
     订单引用的行必然存在，内连接不会丢行。
+
+    **列顺序与 ``MasterOrderRow`` 的字段顺序一一对应**——service 用位置参数
+    构造（``MasterOrderRow(*row)``），对不上就会串列。
     """
     return select(
         Order.id,
@@ -317,15 +333,22 @@ def _order_select():
         ScheduleSlot.end_time,
         Order.created_at,
         Order.completed_at,
+        Address.region,
+        Address.detail,
     ).join(
         ServiceItem, ServiceItem.id == Order.item_id
     ).join(
         ScheduleSlot, ScheduleSlot.id == Order.slot_id
+    ).join(
+        Address, Address.id == Order.address_id
     )
 
 
 def _detail_select():
-    """订单详情查询：比列表多出客户联系方式与上门地址。
+    """订单详情查询：比列表多出客户联系方式。
+
+    地址的 join 已经在 ``_order_select()`` 里了，这里只补两列
+    （contact / phone）——地址表的 join 再写一遍会变成「同一张表连两次」。
 
     地址也在谓词里（``Order.master_id == 我的 master_id``）：
     不是我的单，地址一个字节都不往外发。
@@ -333,8 +356,4 @@ def _detail_select():
     return _order_select().add_columns(
         Address.contact,
         Address.phone,
-        Address.region,
-        Address.detail,
-    ).join(
-        Address, Address.id == Order.address_id
     )

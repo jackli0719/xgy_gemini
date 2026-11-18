@@ -1233,9 +1233,10 @@ export interface components {
         };
         /**
          * MasterOrderDetail
-         * @description 订单详情：多了客户联系方式与上门地址。
+         * @description 订单详情：多了客户联系方式与时段 ID。
          *
-         *     师傅要上门服务，得知道去哪儿、找谁——所以详情里带地址与电话。
+         *     师傅要上门服务，得知道找谁——所以详情里带电话与称呼。
+         *     地址在基类里（列表也给），这里不再重复声明。
          *     可见范围由服务端保证：只有派给他的订单才查得到（404 同构）。
          */
         MasterOrderDetail: {
@@ -1286,6 +1287,16 @@ export interface components {
              */
             created_at: string;
             /**
+             * Address Region
+             * @description 地址所在区域
+             */
+            address_region: string;
+            /**
+             * Address Detail
+             * @description 详细地址
+             */
+            address_detail: string;
+            /**
              * Id
              * @description 订单 ID
              */
@@ -1305,16 +1316,6 @@ export interface components {
              * @description 客户电话
              */
             customer_phone: string;
-            /**
-             * Address Region
-             * @description 地址所在区域
-             */
-            address_region: string;
-            /**
-             * Address Detail
-             * @description 详细地址
-             */
-            address_detail: string;
             /**
              * Completed At
              * @description 完成时间（未完成时为 null）
@@ -1375,6 +1376,16 @@ export interface components {
              * @description 下单时间
              */
             created_at: string;
+            /**
+             * Address Region
+             * @description 地址所在区域
+             */
+            address_region: string;
+            /**
+             * Address Detail
+             * @description 详细地址
+             */
+            address_detail: string;
         };
         /**
          * MasterOrderListResponse
