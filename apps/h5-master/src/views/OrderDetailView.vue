@@ -20,6 +20,10 @@
  * 3. **失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容照旧在页面上。
  * 4. **刷新失败就不给动作按钮**：刷新失败 = 订单状态不可信，
  *    这时候还挂「开始服务」按钮，用户点了也只会再撞一次 404 / 409。
+ * 5. **只有 404 才刷新详情**：师傅端四个写接口的「订单侧冲突」
+ *    （订单不存在 / 不是派给我的 / 状态已变）后端同构成一个 404，
+ *    这时刷新才能拿到真实状态；409 是「师傅当前不可接单」
+ *    （停用 / 休假 / 未审核），订单状态压根没变，刷新学不到东西，不刷新。
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -55,7 +59,9 @@ const rejectVisible = ref(false);
  * 按钮按订单状态给。
  *
  * 只有这三种状态能操作，其余状态（如 PENDING_DISPATCH / COMPLETED）
- * **一个按钮都不给**——给了也是 409，白白让用户点一次。
+ * **一个按钮都不给**——状态不对时后端一律回 404（订单不存在 / 不是我的 /
+ * 状态已变，同构），师傅当前不可接单时回 409，两种都是必然失败的请求，
+ * 白白让用户点一次。
  */
 const canAccept = computed(() => order.value?.status === "PENDING_ACCEPT");
 const canStart = computed(() => order.value?.status === "ACCEPTED");
@@ -72,8 +78,9 @@ const canFinish = computed(() => order.value?.status === "IN_SERVICE");
  * 这里的 `loadError` 非空就是「我们没确认这单还在」，
  * 这时候给按钮等于给一个必然失败的按钮。
  *
- * 注意别误伤：409 冲突后**刷新成功**时 loadError 是空的，
- * 按钮照常给（而且状态要跟着刷新后的新状态走）。
+ * 注意别误伤：404 冲突后**刷新成功**时 loadError 是空的，
+ * 按钮照常给（而且状态要跟着刷新后的新状态走）；
+ * 409（师傅当前不可接单）压根不刷新，loadError 一直空着，按钮照常给。
  */
 const canAct = computed(() => Boolean(order.value) && loadError.value === "");
 
@@ -93,15 +100,21 @@ async function load(): Promise<void> {
 }
 
 /**
- * 「这单已经不在预期状态」——两种情况都算：
+ * 「订单侧冲突」——也就是「这单的状态跟我想的不一样，只有重新拉详情才知道」。
  *
- * - **409**：后端明确说状态冲突；
- * - **404**：后端把「状态不对」「订单不存在」「不是我的单」统一成 404。
+ * 师傅端四个写接口（accept / reject / start / finish）里，
+ * **订单侧的失败一律是 404**：订单不存在 / 不是派给我的 / 状态已变，
+ * 后端刻意同构成一个 404（不让调用方靠报错差异探测，R1；
+ * 见 apps/api/app/services/master_action.py 与 service_flow.py）。
+ * 所以「订单状态变了」只从 404 判断。
  *
- * 这两种都该让用户看到最新状态，所以顺手再拉一次详情。
+ * **409 不是订单侧冲突**：409 = MasterNotDispatchableError =
+ * 「师傅当前不可接单：master_id=N」（停用 / 休假 / 未审核）。
+ * 订单状态压根没变，刷新详情学不到任何东西——刷新只会白白多一次往返，
+ * 而且可能把「不可接单」这个真正的原因盖住。所以 409 不刷新。
  */
-function isStateConflict(err: unknown): boolean {
-  return err instanceof ApiError && (err.status === 409 || err.status === 404);
+function isOrderSideConflict(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
 }
 
 /**
@@ -125,13 +138,18 @@ async function act(
     await action();
     await onSuccess?.();
   } catch (err) {
-    if (isStateConflict(err)) {
-      // 状态已被改掉：带上后端原话，再刷新一次拿真实状态。
+    if (isOrderSideConflict(err)) {
+      // 订单侧冲突（404）：带上后端原话，再刷新一次拿真实状态。
       // 刷新只动 loadError，**不会把 actionError 冲掉**——
       // 用户还得看到后端那句话（不然就只剩一句「状态变了」）。
       actionError.value = errorMessage(err, "订单状态已变化");
       await load();
     } else {
+      // 409（师傅当前不可接单）/ 500 等：**不刷新**。
+      // 409 的话订单状态没变，刷新学不到东西，只会把真正的原因盖住；
+      // 500 更没理由刷新。动作按钮照常留着（loadError 是空的），
+      // 因为后端明确允许停用 / 休假的师傅**拒单**——那是他把手上的单退回去的
+      // 唯一出路，藏掉按钮等于把单卡死在他手上。
       actionError.value = errorMessage(err, "操作失败，请重试");
     }
   } finally {
@@ -208,6 +226,21 @@ function goList(): void {
     </div>
     <div v-else-if="loadError" class="page-block" data-test="error-block">
       <p class="page-error" data-test="error">{{ loadError }}</p>
+      <!--
+        首屏加载失败给「重试」：用户能做的就是再拉一次，
+        让他退回列表再点进订单太绕了。与列表页的错误块保持一致
+        （列表页的「重试」在 OrdersView.vue，同样是 data-test="retry"）。
+        「返回列表」也留着——重试是出路之一，不是唯一出路。
+      -->
+      <van-button
+        size="small"
+        plain
+        type="primary"
+        data-test="retry"
+        @click="load"
+      >
+        重试
+      </van-button>
       <van-button
         size="small"
         plain
@@ -251,7 +284,7 @@ function goList(): void {
         <!--
           按钮按订单状态给：待接单 -> 接单/拒单，已接单 -> 开始服务，
           服务中 -> 完成服务。**其他状态一个按钮都不给**
-          （给了也是 409，白白让用户点一次）。
+          （状态不对时后端回 404，师傅不可接单时回 409，都是必然失败的请求）。
         -->
         <!--
           canAct：详情刷新失败时**整个按钮组都不给**。

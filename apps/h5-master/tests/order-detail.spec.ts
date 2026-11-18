@@ -14,10 +14,17 @@
  *    Vue 还没 patch 出 disabled），必须有同步守卫。
  * 3. **动作失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容还在。
  * 4. **按钮按状态给**：非当前状态不显示对应按钮。
- * 5. **状态冲突才刷新详情**：409 / 404 之后拉一次拿真实状态，
- *    500 之类的普通失败不刷新（用例把两种分支的行为差异钉住）。
- * 6. **刷新失败就不给动作按钮**：刷新失败 = 状态不可信，
+ * 5. **动作成功后刷新详情**：接单 / 开工 / 完工成功都要重新拉一次详情，
+ *    否则页面还按旧状态渲染按钮（接单后还挂着「接单 / 拒单」，
+ *    师傅再点就是一次注定失败的请求）。
+ * 6. **只有订单侧冲突（404）才刷新详情**：404 = 订单不存在 / 不是我的 /
+ *    状态已变（后端同构），这时刷新才能拿到真实状态；
+ *    409 = 师傅当前不可接单（停用 / 休假 / 未审核），订单状态压根没变，
+ *    刷新学不到东西，所以不刷新；500 之类的普通失败同样不刷新。
+ * 7. **刷新失败就不给动作按钮**：刷新失败 = 状态不可信，
  *    再给按钮等于给一个必然再撞一次 404 的死按钮。
+ * 8. **首屏加载失败有「重试」**：不能逼用户退回列表再点进订单才能重试
+ *    （列表页早就给了「重试」，两边要一致）。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -120,6 +127,67 @@ describe("订单详情页（师傅端）", () => {
 
     expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
+  });
+
+  // ===================================================================
+  // UI-M2：动作成功后刷新详情（按钮跟着新状态走）
+  //
+  // 这几条守的是**「成功后要重新拉详情」这条链**：
+  // 把 accept / start 里的 act(..., load) 的第二个参数去掉，
+  // 页面就会继续按旧状态渲染按钮（接单后还挂着「接单 / 拒单」），
+  // 师傅再点一次就是注定失败的一次请求。
+  //
+  // 所以这里既断言「getMasterOrder 被调了第二次」，
+  // 也断言「按钮已经换成新状态对应的那个」——少任何一半都钉不住这条链。
+  // ===================================================================
+
+  it("接单成功 -> 刷新详情，按钮跟着新状态走（不再显示「接单」）", async () => {
+    // 第一次是首屏的 PENDING_ACCEPT，第二次是接单成功后刷新的 ACCEPTED
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("PENDING_ACCEPT"))
+      .mockResolvedValueOnce(detail("ACCEPTED"));
+    mockClient.acceptOrder.mockResolvedValue({
+      order_no: "OTO20260101000001",
+      status: "ACCEPTED",
+    });
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    // 首屏是「接单 / 拒单」
+    expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(true);
+
+    await wrapper.find('[data-test="accept-button"]').trigger("click");
+    await flushPromises();
+
+    // **确实刷新过**：初始 1 次 + 成功后刷新 1 次
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+    // 刷新后按钮跟着新状态走：PENDING_ACCEPT -> ACCEPTED = 「开始服务」
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(false);
+  });
+
+  it("开工成功 -> 刷新详情，按钮跟着新状态走（出现「完成服务」）", async () => {
+    // 第一次是首屏的 ACCEPTED，第二次是开工成功后刷新的 IN_SERVICE
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("ACCEPTED"))
+      .mockResolvedValueOnce(detail("IN_SERVICE"));
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(true);
+
+    await wrapper.find('[data-test="start-button"]').trigger("click");
+    await flushPromises();
+
+    // **确实刷新过**：初始 1 次 + 成功后刷新 1 次
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+    // 刷新后按钮跟着新状态走：ACCEPTED -> IN_SERVICE = 「完成服务」
+    expect(wrapper.find('[data-test="finish-button"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
   });
 
@@ -242,16 +310,16 @@ describe("订单详情页（师傅端）", () => {
   // UI-M2：动作失败不白屏
   // ===================================================================
 
-  it("动作失败（409 状态冲突）-> 刷新详情，按钮跟着真实的新状态走", async () => {
+  it("动作失败（404 订单侧冲突）-> 刷新详情，按钮跟着真实的新状态走", async () => {
     // **分两次返回不同状态**：第一次是页面初始的 ACCEPTED，
     // 第二次是冲突后刷新拿到的真实状态 IN_SERVICE。
     // 只回一个状态的话，刷新这个行为根本钉不住（按钮不会变），
-    // 把 409 改成 418 用例也照样全绿。
+    // 把 404 改成 418 用例也照样全绿。
     mockClient.getMasterOrder
       .mockResolvedValueOnce(detail("ACCEPTED"))
       .mockResolvedValueOnce(detail("IN_SERVICE"));
     mockClient.startService.mockRejectedValue(
-      new ApiError(409, "订单状态已变", null),
+      new ApiError(404, "订单不存在：order_no=OTO20260101000001", null),
     );
 
     const { pinia, router } = await setupApp("/orders/OTO20260101000001");
@@ -263,7 +331,7 @@ describe("订单详情页（师傅端）", () => {
 
     // 后端原话
     expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
-      "订单状态已变",
+      "订单不存在",
     );
     // 「返回列表」按钮
     expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
@@ -278,7 +346,41 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
   });
 
-  it("动作失败（500，不是状态冲突）-> 不刷新详情", async () => {
+  it("动作失败（409 = 师傅当前不可接单）-> 显示后端原话，**不刷新详情**", async () => {
+    // 后端契约：师傅端四个写接口里，**订单侧冲突一律是 404**；
+    // 409 = MasterNotDispatchableError = 「师傅当前不可接单：master_id=N」
+    // （停用 / 休假 / 未审核）——订单状态压根没变，
+    // 刷新详情学不到任何东西，所以不刷新。
+    mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
+    mockClient.startService.mockRejectedValue(
+      new ApiError(409, "师傅当前不可接单：master_id=1", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="start-button"]').trigger("click");
+    await flushPromises();
+
+    // 后端原话**原样显示**
+    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
+      "师傅当前不可接单",
+    );
+    // 「返回列表」按钮（用户有出路）
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+    // 不白屏：订单内容还在
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+    // **不刷新**：409 跟订单状态无关，刷新只会白白多一次往返，
+    // 还可能把「不可接单」这个真正的原因盖住。
+    // 跟 404 / 500 两条用例一起，把三种分支的行为差异钉住。
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(1);
+    // **不因为 409 就藏掉动作按钮**：后端明确允许停用 / 休假的师傅拒单
+    // （让他把手上的单退回去才是出路），藏掉按钮等于把单卡死在他手上。
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(true);
+  });
+
+  it("动作失败（500，不是订单侧冲突）-> 不刷新详情", async () => {
     mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
     mockClient.startService.mockRejectedValue(
       new ApiError(500, "服务器开小差了，请稍后再试", null),
@@ -295,8 +397,8 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
       "服务器开小差了",
     );
-    // **500 不是状态冲突**：不刷新详情（只有初始那 1 次）。
-    // 这条用例跟上面那条 409 的用例一起，把两个分支的行为差异钉住。
+    // **500 不是订单侧冲突**：不刷新详情（只有初始那 1 次）。
+    // 这条用例跟上面 404 / 409 两条一起，把三个分支的行为差异钉住。
     expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(1);
   });
 
@@ -342,6 +444,36 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="back-to-list"]').text()).toContain("返回列表");
     // 出错时不该同时冒出两个「返回列表」按钮
     expect(wrapper.findAll('[data-test="back-to-list"]')).toHaveLength(1);
+  });
+
+  it("详情首屏加载失败（网络异常）-> 给「重试」按钮，点它重新拉一次", async () => {
+    // 第一次网络层失败，第二次成功：点「重试」要走同一条 load()。
+    mockClient.getMasterOrder
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(detail("ACCEPTED"));
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    // 网络错的统一文案（见 utils/error.ts）
+    expect(wrapper.find('[data-test="error"]').text()).toContain(
+      "网络异常，请重试",
+    );
+    // **有「重试」**：不能逼用户退回列表再点进订单才能重试
+    // （列表页早就有「重试」了，两边要一致）
+    expect(wrapper.find('[data-test="retry"]').exists()).toBe(true);
+    // 「返回列表」也留着（重试不是唯一出路）
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+
+    await wrapper.find('[data-test="retry"]').trigger("click");
+    await flushPromises();
+
+    // 重试真的重新拉了一次详情
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+    // 成功后错误块消失，订单内容出来
+    expect(wrapper.find('[data-test="error-block"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
 
   // ===================================================================
