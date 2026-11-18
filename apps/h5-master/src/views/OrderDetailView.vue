@@ -221,6 +221,18 @@ async function reject(reason: string): Promise<void> {
 }
 
 /**
+ * 打开拒单弹窗。
+ *
+ * **先把上一次的错误清掉**：弹窗里会显示后端原话（serverError），
+ * 带着上一次动作的错误（比如刚才接单失败）打开弹窗，
+ * 用户会以为这次拒单也失败了。
+ */
+function openReject(): void {
+  actionError.value = "";
+  rejectVisible.value = true;
+}
+
+/**
  * 回列表页（错误块里的「返回列表」按钮）。
  *
  * 同样用 replace：这个详情页可能已经不存在了（拒单后 / 订单被收走），
@@ -345,7 +357,7 @@ function goList(): void {
               :loading="busy"
               :disabled="busy"
               data-test="reject-button"
-              @click="rejectVisible = true"
+              @click="openReject"
             >
               拒单
             </van-button>

@@ -32,6 +32,9 @@
  *    报「操作失败」是骗人的——师傅会以为没拒成功、白点一次。
  * 11. **拒单失败弹窗不关**：原因保留、后端原话显示在弹窗里，
  *     师傅能直接再点一次「确认拒单」重试。
+ * 12. **打开拒单弹窗先清掉上一次的错误**：弹窗里显示的是后端原话，
+ *     带着上一次动作（比如接单失败）的错误打开弹窗，用户会以为
+ *     这次拒单也失败了。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -351,6 +354,33 @@ describe("订单详情页（师傅端）", () => {
       "拒单失败，请稍后再试",
     );
     expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+  });
+
+  it("打开拒单弹窗 -> 清掉上一次的错误（弹窗里不显示别人的错）", async () => {
+    // 上一个动作（接单）失败，页面顶部有错误；再点「拒单」打开弹窗时，
+    // 弹窗里**不能**还挂着那条错——用户会以为这次拒单也失败了。
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    mockClient.acceptOrder.mockRejectedValue(
+      new ApiError(409, "师傅当前不可接单：master_id=1", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    // 先让接单失败，页面顶部挂上错误
+    await wrapper.find('[data-test="accept-button"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
+      "师傅当前不可接单",
+    );
+
+    // 打开拒单弹窗：上一次的错误被清掉
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="reject-server-error"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="action-error"]').exists()).toBe(false);
   });
 
   it("动作成功但收尾失败 -> 说「操作已完成」，不说「操作失败」", async () => {
