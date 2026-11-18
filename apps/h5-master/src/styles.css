@@ -46,6 +46,19 @@ body {
   margin: 12px 4px;
 }
 
+/*
+ * 一次性回执（如「已拒单」）：列表页顶部的一条提示。
+ * 只写排版，颜色用 Vant 默认的中性色。
+ */
+.page-notice {
+  margin: 0 4px 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #646566;
+  background: #ffffff;
+  border-radius: 4px;
+}
+
 .page-footer {
   display: flex;
   align-items: center;

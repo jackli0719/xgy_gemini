@@ -20,6 +20,14 @@
  *
  * 每个分组一份状态（loading / error 都按分组记）：
  * 共用一份的话，「待接单」那条错误提示会跟着冒到「待服务」页签上。
+ *
+ * UI-M2：详情页拒单成功后跳回这里，页面顶部显示一条**一次性回执**
+ * （「已拒单」）——见 utils/notice.ts。回执在 setup 里就被取走，
+ * 所以用户下次再回列表不会看到残留的提示。
+ *
+ * **列表页拒单不写回执**：列表页拒单成功后订单会被退回待派单、
+ * 直接从列表里消失，用户看得到结果（列表少了一单），不需要额外提示；
+ * 详情页拒单才需要回执，因为它必须跳回列表、离开详情页。
  */
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -28,6 +36,7 @@ import { api } from "@/api";
 import RejectPopup from "@/components/RejectPopup.vue";
 import { ORDER_STATUS_TEXT, WORK_TABS } from "@/constants/status";
 import { errorMessage } from "@/utils/error";
+import { takeNotice } from "@/utils/notice";
 import type { components } from "@oto/shared/api";
 
 type MasterOrderItem = components["schemas"]["MasterOrderItem"];
@@ -74,6 +83,14 @@ const retryAction = ref<(() => Promise<void>) | null>(null);
 /** 拒单弹窗 */
 const rejectVisible = ref(false);
 const rejectTarget = ref<MasterOrderItem | null>(null);
+
+/**
+ * 一次性回执（如「已拒单」）。
+ *
+ * 在 setup 里就取走（不是 onMounted）：回执是一次性的，
+ * 读到即清空，用户下次再回列表看不到残留。
+ */
+const noticeText = ref(takeNotice());
 
 const activeStatus = computed<MasterOrderStatus>(
   () => WORK_TABS[activeTab.value].status,
@@ -186,6 +203,9 @@ function openDetail(orderNo: string): void {
 
 <template>
   <div class="page">
+    <!-- 一次性回执（如「已拒单」）：只在跳回列表的那一次出现 -->
+    <div v-if="noticeText" class="page-notice" data-test="notice">{{ noticeText }}</div>
+
     <!-- 动作失败：后端原话 + 重试。页面内容照旧在下面，不白屏 -->
     <div v-if="actionError" class="page-block" data-test="action-error">
       <p class="page-error" data-test="action-error-text">{{ actionError }}</p>
