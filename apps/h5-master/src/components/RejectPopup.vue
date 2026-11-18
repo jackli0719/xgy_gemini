@@ -24,6 +24,15 @@ const props = defineProps<{
    * 不传（列表页）时行为完全不变：只有本地的空值校验错误。
    */
   serverError?: string;
+  /**
+   * 请求在途（可选）。
+   *
+   * 拒单请求是**弹窗里的「确认拒单」按钮**发出的，所以「请求中」的
+   * 反馈必须落在这个按钮上：loading + disabled，让用户知道
+   * 「已经点下去了、在处理」，而不是以为没点上又点一次。
+   * 不传（列表页）时按钮外观完全不变。
+   */
+  loading?: boolean;
 }>();
 const emit = defineEmits<{
   "update:show": [value: boolean];
@@ -85,7 +94,18 @@ function confirm(): void {
       </p>
       <div class="reject-popup-actions">
         <van-button data-test="reject-cancel" @click="close">取消</van-button>
-        <van-button type="primary" data-test="reject-confirm" @click="confirm">
+        <!--
+          loading / disabled 都绑到「确认拒单」上：拒单请求是这个按钮发出的，
+          请求在途时按钮外观要变（不然用户以为没点上）。
+          loading 是可选 prop，列表页不传 = 行为不变。
+        -->
+        <van-button
+          type="primary"
+          :loading="loading"
+          :disabled="loading"
+          data-test="reject-confirm"
+          @click="confirm"
+        >
           确认拒单
         </van-button>
       </div>

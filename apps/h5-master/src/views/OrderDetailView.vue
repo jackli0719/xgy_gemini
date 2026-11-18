@@ -254,8 +254,15 @@ function goList(): void {
       错误块：两个错误源互斥（v-if / v-else-if），「返回列表」按钮
       永远只出现一次。订单内容在下面照常渲染 —— 出错时页面不白屏。
 
-      `&& !rejectVisible`：拒单失败时错误显示在**弹窗里**（用户视线所在处），
-      页面顶部就别再重复同一句话了。
+      两个块都带 `&& !rejectVisible`：拒单失败时错误显示在**弹窗里**
+      （用户视线所在处），页面顶部就**一个都不渲染**。
+      为什么两个都要带：拒单 404 之后代码会再拉一次详情，这次刷新
+      也可能 404，于是 actionError 与 loadError 同时非空、而且是同一句
+      后端原话（「订单不存在：order_no=…」）。只给第一个块加条件的话，
+      第二个块照样会把同一句话在页面顶部再显示一遍（还多一个「重试」），
+      用户看到的是同一条错误出现两次。
+      关掉弹窗后（rejectVisible = false）页面顶部才重新出现错误块，
+      那时两块的互斥关系由 v-if / v-else-if 保证，「返回列表」仍然只有一个。
     -->
     <div
       v-if="actionError && !rejectVisible"
@@ -273,7 +280,11 @@ function goList(): void {
         返回列表
       </van-button>
     </div>
-    <div v-else-if="loadError" class="page-block" data-test="error-block">
+    <div
+      v-else-if="loadError && !rejectVisible"
+      class="page-block"
+      data-test="error-block"
+    >
       <p class="page-error" data-test="error">{{ loadError }}</p>
       <!--
         首屏加载失败给「重试」：用户能做的就是再拉一次，
@@ -390,11 +401,15 @@ function goList(): void {
 
     <!--
       拒单弹窗：后端原话透传进弹窗（用户视线所在处）。
-      列表页不传这个 prop，行为不变。
+      loading 传 busy：拒单请求是弹窗里那个「确认拒单」按钮发出的，
+      请求在途时那个按钮要显示 loading（详情页上的「拒单」按钮被弹窗挡住了，
+      用户看不见它的 loading）。
+      列表页不传这两个 prop，行为不变。
     -->
     <RejectPopup
       v-model:show="rejectVisible"
       :server-error="actionError"
+      :loading="busy"
       @confirm="reject"
     />
   </div>

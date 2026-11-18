@@ -35,6 +35,15 @@
  * 12. **打开拒单弹窗先清掉上一次的错误**：弹窗里显示的是后端原话，
  *     带着上一次动作（比如接单失败）的错误打开弹窗，用户会以为
  *     这次拒单也失败了。
+ * 13. **同一句错误只显示一次**：拒单 404 且随后的刷新详情也 404 时，
+ *     actionError 与 loadError 是同一句后端原话——弹窗里已经有一份，
+ *     页面顶部就**一个都不渲染**（不重复显示）。
+ * 14. **拒单请求在途**：真正发请求的是弹窗里的「确认拒单」按钮，
+ *     它必须显示 loading + disabled（详情页上那个「拒单」按钮被弹窗
+ *     挡住了，用户看不见它的 loading，会以为没点上）。
+ * 15. **刷新不盖住内容 / 旧错误不挂着**：动作成功后的刷新在途时
+ *     不出现加载动画（订单内容还在）；一次成功动作之后，
+ *     上一次动作失败留下的错误被清掉。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -330,6 +339,49 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
 
+  it("拒单请求在途 -> 弹窗里的「确认拒单」按钮显示 loading 并 disabled", async () => {
+    // 拒单请求是**弹窗里的「确认拒单」按钮**发出的，
+    // 所以「请求中」的反馈必须落在这个按钮上。
+    // 详情页上那个「拒单」按钮的 loading 被弹窗挡住了，用户看不见，
+    // 光靠它用户会以为没点上（连点虽然有 busy 守卫兜着，但用户不知道）。
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    // 请求挂住不返回：好观察「在途」这个中间态
+    let release: (value: unknown) => void = () => {};
+    mockClient.rejectOrder.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    expect(mockClient.rejectOrder).toHaveBeenCalledTimes(1);
+
+    // 请求在途：弹窗里那个按钮是 loading + disabled 的状态
+    // 用 isVisible() 不用 exists()：van-popup 用 v-show，
+    // 关掉时节点还留在 DOM 里，exists() 照样为 true
+    const confirmButton = wrapper.find('[data-test="reject-confirm"]');
+    expect(confirmButton.isVisible()).toBe(true);
+    expect(confirmButton.classes()).toContain("van-button--loading");
+    expect(confirmButton.attributes("disabled")).toBeDefined();
+
+    release({
+      order_no: "OTO20260101000001",
+      status: "PENDING_DISPATCH",
+      master_id: null,
+    });
+    await flushPromises();
+  });
+
   it("拒单失败后关掉弹窗 -> 页面顶部才给错误 + 返回列表按钮", async () => {
     mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
     mockClient.rejectOrder.mockRejectedValue(
@@ -583,6 +635,56 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
 
+  it("拒单 404 且刷新详情也 404 -> 错误只在弹窗里出现一次，页面顶部不重复", async () => {
+    // 拒单返回 404（订单侧冲突）之后 act() 会再拉一次详情；
+    // 这次刷新也 404 -> actionError 与 loadError 同时非空，
+    // 而且是**同一句**后端原话（「订单不存在：order_no=…」）。
+    //
+    // 弹窗开着的时候，页面顶部一个错误块都不渲染：
+    // 错误只在弹窗里出现一次（用户视线所在处），不重复显示。
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("PENDING_ACCEPT"))
+      .mockRejectedValueOnce(
+        new ApiError(404, "订单不存在：order_no=OTO20260101000001", null),
+      );
+    mockClient.rejectOrder.mockRejectedValue(
+      new ApiError(404, "订单不存在：order_no=OTO20260101000001", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    // 后端原话在**弹窗里**（用户视线所在处），弹窗还开着（失败就关掉的话，
+    // 用户得重新打开、重填一遍原因才知道成没成）
+    expect(wrapper.find('[data-test="reject-popup"]').isVisible()).toBe(true);
+    const serverError = wrapper.find('[data-test="reject-server-error"]');
+    expect(serverError.isVisible()).toBe(true);
+    expect(serverError.text()).toContain("订单不存在");
+
+    // **页面顶部不重复显示同一句**：两个错误块都不渲染
+    // （少了 loadError 那条链上的 !rejectVisible，这里就会多出
+    //  一个显示同一句话的 error-block + 「重试」）
+    expect(wrapper.find('[data-test="error-block"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="action-error"]').exists()).toBe(false);
+
+    // 关掉弹窗后，错误回到页面顶部 —— 此时「返回列表」仍然只有一个
+    // （两个错误块互斥；两块都渲染就是两个，用户不知道该点哪个）
+    await wrapper.find('[data-test="reject-cancel"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
+      "订单不存在",
+    );
+    expect(wrapper.findAll('[data-test="back-to-list"]')).toHaveLength(1);
+  });
+
   it("详情接口 404（订单不存在）-> 显示后端原话 + 返回列表按钮", async () => {
     mockClient.getMasterOrder.mockRejectedValue(
       new ApiError(404, "订单不存在", null),
@@ -670,6 +772,91 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(false);
     expect(wrapper.findAll(".page-footer button")).toHaveLength(1);
+  });
+
+  // ===================================================================
+  // UI-M2：刷新别把已有内容抽走 / 旧错误别挂着
+  // ===================================================================
+
+  it("动作成功后的刷新在途 -> 不用加载动画盖住页面（订单内容还在）", async () => {
+    // 「刷新时别用加载动画盖住页面」：已经有订单内容时，刷新**不能**抽走内容。
+    // 模板里是 v-if="loading && !order" —— 少了 && !order 的话，
+    // 每次刷新都会闪一下加载动画、把订单内容藏起来。
+    //
+    // 第二次 getMasterOrder 挂住不返回，好观察「刷新在途」这个中间态。
+    let release: (value: unknown) => void = () => {};
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("PENDING_ACCEPT"))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+    mockClient.acceptOrder.mockResolvedValue({
+      order_no: "OTO20260101000001",
+      status: "ACCEPTED",
+    });
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="accept-button"]').trigger("click");
+    await flushPromises();
+
+    // 确实在刷新（初始 1 次 + 成功后刷新 1 次）
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+
+    // **刷新在途，但页面没有加载动画**：内容不抽走
+    expect(wrapper.find('[data-test="loading"]').exists()).toBe(false);
+    // 订单内容还在（没被加载动画盖住、也没白屏）
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+
+    release(detail("ACCEPTED"));
+    await flushPromises();
+  });
+
+  it("上一次动作失败留下的错误 -> 下一次动作成功后被清掉", async () => {
+    // act() 开头的 actionError.value = ""：一次成功动作之后，
+    // 页面顶部不该还挂着上一次的旧错误（用户会以为这次也失败了）。
+    //
+    // 用「开始服务」两次：第一次失败（409），第二次成功。
+    // 为什么不是「接单失败 -> 接单成功」：按钮按订单状态给，
+    // 待接单才给「接单」、已接单才给「开始服务」，同一个页面上
+    // 这两个动作互斥（接单成功后这单就不再是「待接单」了）。
+    mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
+    mockClient.startService
+      .mockRejectedValueOnce(
+        new ApiError(409, "师傅当前不可接单：master_id=1", null),
+      )
+      .mockResolvedValueOnce({
+        order_no: "OTO20260101000001",
+        status: "IN_SERVICE",
+        completed_at: null,
+      });
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    // 先制造一次失败：页面顶部挂上错误
+    await wrapper.find('[data-test="start-button"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="action-error"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
+      "师傅当前不可接单",
+    );
+
+    // 再做一次动作，这次成功 -> 走刷新
+    await wrapper.find('[data-test="start-button"]').trigger("click");
+    await flushPromises();
+
+    expect(mockClient.startService).toHaveBeenCalledTimes(2);
+    // 成功之后确实刷新了详情
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+    // **上一次的旧错误被清掉**：页面顶部不再挂着它
+    expect(wrapper.find('[data-test="action-error"]').exists()).toBe(false);
   });
 
   // ===================================================================
