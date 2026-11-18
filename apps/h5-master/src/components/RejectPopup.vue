@@ -12,14 +12,27 @@
  */
 import { ref, watch } from "vue";
 
-const props = defineProps<{ show: boolean }>();
+const props = defineProps<{
+  show: boolean;
+  /**
+   * 后端返回的失败原因（可选）。
+   *
+   * 拒单失败时用户**视线在弹窗上**（他刚点了「确认拒单」），
+   * 错误写在页面顶部的提示条里他根本看不见。详情页把动作错误透传进来，
+   * 让失败原因显示在弹窗内——用户能立刻看到成没成、能不能直接重试。
+   *
+   * 不传（列表页）时行为完全不变：只有本地的空值校验错误。
+   */
+  serverError?: string;
+}>();
 const emit = defineEmits<{
   "update:show": [value: boolean];
   confirm: [reason: string];
 }>();
 
 const reason = ref("");
-const error = ref("");
+/** 本地的空值校验错误（跟后端原因分开存，两条同时显示、互不覆盖）。 */
+const reasonError = ref("");
 
 // 每次打开都清空上一次的输入（免得把上一单的原因带给这一单）
 watch(
@@ -27,7 +40,7 @@ watch(
   (visible) => {
     if (visible) {
       reason.value = "";
-      error.value = "";
+      reasonError.value = "";
     }
   },
 );
@@ -39,7 +52,7 @@ function close(): void {
 function confirm(): void {
   const text = reason.value.trim();
   if (!text) {
-    error.value = "请填写拒单原因";
+    reasonError.value = "请填写拒单原因";
     return;
   }
   emit("confirm", text);
@@ -63,7 +76,13 @@ function confirm(): void {
         placeholder="请输入拒单原因"
         data-test="reject-reason"
       />
-      <p v-if="error" class="page-error" data-test="reject-error">{{ error }}</p>
+      <p v-if="reasonError" class="page-error" data-test="reject-error">
+        {{ reasonError }}
+      </p>
+      <!-- 后端原话（可选）：与上面的空值校验错误分开、两条可同时显示 -->
+      <p v-if="serverError" class="page-error" data-test="reject-server-error">
+        {{ serverError }}
+      </p>
       <div class="reject-popup-actions">
         <van-button data-test="reject-cancel" @click="close">取消</van-button>
         <van-button type="primary" data-test="reject-confirm" @click="confirm">

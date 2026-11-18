@@ -12,7 +12,8 @@
  *    所以拒单后**不能再刷新详情**，只能跳回列表（并显示一条回执）。
  * 2. **连点两次只发一次请求**：光靠 disabled 拦不住（两次点击之间
  *    Vue 还没 patch 出 disabled），必须有同步守卫。
- * 3. **动作失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容还在。
+ * 3. **动作失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容还在
+ *    （拒单失败是个例外：后端原话显示在弹窗里，见第 11 条）。
  * 4. **按钮按状态给**：非当前状态不显示对应按钮。
  * 5. **动作成功后刷新详情**：接单 / 开工 / 完工成功都要重新拉一次详情，
  *    否则页面还按旧状态渲染按钮（接单后还挂着「接单 / 拒单」，
@@ -25,13 +26,19 @@
  *    再给按钮等于给一个必然再撞一次 404 的死按钮。
  * 8. **首屏加载失败有「重试」**：不能逼用户退回列表再点进订单才能重试
  *    （列表页早就给了「重试」，两边要一致）。
+ * 9. **两个错误源互斥**：动作错误与加载错误同时非空时（动作 404 → 刷新也 404），
+ *    页面只能有一个「返回列表」按钮——两块都渲染就是两个，用户不知道该点哪个。
+ * 10. **收尾失败说「操作已完成」**：动作成功了但收尾（跳回列表）挂了，
+ *    报「操作失败」是骗人的——师傅会以为没拒成功、白点一次。
+ * 11. **拒单失败弹窗不关**：原因保留、后端原话显示在弹窗里，
+ *     师傅能直接再点一次「确认拒单」重试。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App.vue";
 import OrderDetailView from "@/views/OrderDetailView.vue";
-import { clearNotice, setNotice, takeNotice } from "@/utils/notice";
+import { setNotice, takeNotice } from "@/utils/notice";
 import { ApiError } from "@oto/shared/api";
 
 import { mockClient } from "./client-mock";
@@ -43,7 +50,9 @@ vi.mock("@oto/shared/api", async (importOriginal) => {
   return { ...actual, createApiClient: () => client };
 });
 
-function detail(status: "PENDING_ACCEPT" | "ACCEPTED" | "IN_SERVICE") {
+function detail(
+  status: "PENDING_ACCEPT" | "ACCEPTED" | "IN_SERVICE" | "PENDING_CONFIRM",
+) {
   return {
     id: 1,
     order_no: "OTO20260101000001",
@@ -72,7 +81,8 @@ describe("订单详情页（师傅端）", () => {
     // 否则上一个用例没用完的一次性返回值会串到下一个用例。
     vi.resetAllMocks();
     // 回执是模块级单例，用例之间得清干净（否则提示会串到下一个用例）
-    clearNotice();
+    // setNotice("") = 写一条空回执 = 清空（生产代码没有单独的清空导出）
+    setNotice("");
     mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
     mockClient.startService.mockResolvedValue({
       order_no: "OTO20260101000001",
@@ -191,6 +201,38 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
   });
 
+  it("完工成功 -> 刷新详情，状态变「待确认」，动作按钮全部消失", async () => {
+    // 第一次是首屏的 IN_SERVICE，第二次是完工成功后刷新的 PENDING_CONFIRM
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("IN_SERVICE"))
+      .mockResolvedValueOnce(detail("PENDING_CONFIRM"));
+    mockClient.finishService.mockResolvedValue({
+      order_no: "OTO20260101000001",
+      status: "PENDING_CONFIRM",
+      completed_at: null,
+    });
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="finish-button"]').exists()).toBe(true);
+
+    await wrapper.find('[data-test="finish-button"]').trigger("click");
+    await flushPromises();
+
+    // **确实刷新过**：初始 1 次 + 成功后刷新 1 次
+    // （去掉 finish() 里的 act(..., load) 第二个参数，这里就会只剩 1 次）
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+    // 刷新后状态跟着新状态走：IN_SERVICE -> PENDING_CONFIRM = 「待确认」
+    expect(wrapper.find('[data-test="order-status"]').text()).toContain("待确认");
+    // 完工后订单进「待客户确认」，师傅这边**一个可点的动作都不剩**
+    expect(wrapper.find('[data-test="finish-button"]').exists()).toBe(false);
+    expect(wrapper.findAll(".page-footer button")).toHaveLength(0);
+    // 不白屏：订单内容还在
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+  });
+
   // ===================================================================
   // UI-M2：拒单后不回详情（详情必然 404）
   // ===================================================================
@@ -238,7 +280,7 @@ describe("订单详情页（师傅端）", () => {
     expect(mockClient.getMasterOrder.mock.calls.length).toBe(detailCallsBefore);
   });
 
-  it("拒单失败 -> 留在详情页，显示后端原话 + 返回列表按钮", async () => {
+  it("拒单失败 -> 留在详情页，弹窗不关、原因保留，后端原话显示在弹窗里", async () => {
     mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
     mockClient.rejectOrder.mockRejectedValue(
       new ApiError(500, "拒单失败，请稍后再试", null),
@@ -256,13 +298,90 @@ describe("订单详情页（师傅端）", () => {
 
     // 还在详情页（没跳走）
     expect(router.currentRoute.value.path).toBe("/orders/OTO20260101000001");
-    // 显示后端原话 + 返回列表按钮
+    // **弹窗还开着**：失败就关掉的话，用户得重新打开、重填一遍原因
+    // （RejectPopup 每次打开都清空输入）才知道成没成
+    // 用 isVisible() 而不是 exists()：van-popup 关掉时只是 v-show 隐藏，
+    // 节点还留在 DOM 里，exists() 照样为 true（那这条断言等于没钉）
+    expect(wrapper.find('[data-test="reject-popup"]').isVisible()).toBe(true);
+    // 后端原话显示在**弹窗里**（用户视线所在处），不在页面顶部
+    expect(wrapper.find('[data-test="reject-server-error"]').isVisible()).toBe(
+      true,
+    );
+    expect(wrapper.find('[data-test="reject-server-error"]').text()).toContain(
+      "拒单失败，请稍后再试",
+    );
+    // 页面顶部不重复显示同一句话（弹窗里已经有一份）
+    expect(wrapper.find('[data-test="action-error"]').exists()).toBe(false);
+    // **原因没被清空**：可以直接再点「确认拒单」重试
+    const reasonInput = wrapper.find(
+      '[data-test="reject-reason"] input',
+    ).element as HTMLInputElement;
+    expect(reasonInput.value).toBe("临时有事");
+
+    // 直接重试：原因还在，不用重填
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+    expect(mockClient.rejectOrder).toHaveBeenCalledTimes(2);
+
+    // 订单内容还在（不白屏）
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+  });
+
+  it("拒单失败后关掉弹窗 -> 页面顶部才给错误 + 返回列表按钮", async () => {
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    mockClient.rejectOrder.mockRejectedValue(
+      new ApiError(500, "拒单失败，请稍后再试", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    // 关掉弹窗（用户放弃重试）：错误回到页面顶部，用户有「返回列表」的出路
+    await wrapper.find('[data-test="reject-cancel"]').trigger("click");
+    await flushPromises();
+
     expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
       "拒单失败，请稍后再试",
     );
     expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
-    // 订单内容还在（不白屏）
-    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+  });
+
+  it("动作成功但收尾失败 -> 说「操作已完成」，不说「操作失败」", async () => {
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    mockClient.rejectOrder.mockResolvedValue({
+      order_no: "OTO20260101000001",
+      status: "PENDING_DISPATCH",
+      master_id: null,
+    });
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    // 收尾（跳回列表）挂了，但**动作本身是成功的**
+    vi.spyOn(router, "replace").mockRejectedValue(new Error("导航失败"));
+
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    // 动作已经生效（后端把单退回 PENDING_DISPATCH），只是页面没跟上
+    expect(mockClient.rejectOrder).toHaveBeenCalledTimes(1);
+    const text = wrapper.find('[data-test="action-error-text"]').text();
+    // **不能报「操作失败」**：那会让师傅以为没拒成功、白点一次
+    expect(text).toContain("操作已完成");
+    expect(text).not.toContain("操作失败");
+    // 用户有出路：回列表
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
   });
 
   // ===================================================================
@@ -424,6 +543,10 @@ describe("订单详情页（师傅端）", () => {
       "订单不存在",
     );
     expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+    // **两个错误源互斥**：这里 actionError 与 loadError 同时非空
+    // （动作 404 → 刷新详情也 404），两块都渲染就会出现**两个**
+    // 「返回列表」按钮，用户不知道该点哪个
+    expect(wrapper.findAll('[data-test="back-to-list"]')).toHaveLength(1);
     // **死按钮不给**：刷新失败了还挂「开始服务」，用户点了只会再撞一次 404
     expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
     // 不白屏：订单内容还在
@@ -524,7 +647,7 @@ describe("订单详情页（师傅端）", () => {
   // ===================================================================
 
   it("回执只出现一次：takeNotice 读到即清空（消费后不再有残留）", () => {
-    // beforeEach 已经 clearNotice() 复位了
+    // beforeEach 已经 setNotice("") 复位了（写一条空回执 = 清空）
     setNotice("已拒单");
     // 第一次读到
     expect(takeNotice()).toBe("已拒单");

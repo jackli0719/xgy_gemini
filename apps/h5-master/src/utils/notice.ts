@@ -16,20 +16,15 @@ import { ref } from "vue";
 /** 全应用共享的一条回执（空串 = 没有回执）。 */
 const notice = ref("");
 
-/** 写一条回执。 */
+/**
+ * 写一条回执。
+ *
+ * **传空串 = 清掉回执**：回执是模块级单例，测试里要先复位（不然上一个
+ * 用例写的回执会串到下一个用例）。不另开一个 clearNotice()——
+ * 生产代码里不该留只给测试用的导出，清空就是「写一条空回执」。
+ */
 export function setNotice(text: string): void {
   notice.value = text;
-}
-
-/**
- * 清掉回执。
- *
- * **只给测试用**：回执是模块级单例，用例之间得清干净，
- * 否则上一个用例写的回执会串到下一个用例。
- * 生产代码不用它——生产代码走 takeNotice()，读到即清空。
- */
-export function clearNotice(): void {
-  notice.value = "";
 }
 
 /**

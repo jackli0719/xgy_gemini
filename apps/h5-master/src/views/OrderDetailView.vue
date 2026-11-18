@@ -17,13 +17,19 @@
  *    记一条回执（「已拒单」）+ 跳回列表。刷新详情 = 白屏 + 404。
  * 2. **连点只发一次请求**：同步 ref 守住（不只靠 disabled），
  *    两次点击之间 Vue 还没 patch 出 disabled，光靠按钮禁用拦不住。
- * 3. **失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容照旧在页面上。
+ * 3. **失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容照旧在页面上
+ *    （拒单失败是个例外：后端原话显示在弹窗里，见第 7 条）。
  * 4. **刷新失败就不给动作按钮**：刷新失败 = 订单状态不可信，
  *    这时候还挂「开始服务」按钮，用户点了也只会再撞一次 404 / 409。
  * 5. **只有 404 才刷新详情**：师傅端四个写接口的「订单侧冲突」
  *    （订单不存在 / 不是派给我的 / 状态已变）后端同构成一个 404，
  *    这时刷新才能拿到真实状态；409 是「师傅当前不可接单」
  *    （停用 / 休假 / 未审核），订单状态压根没变，刷新学不到东西，不刷新。
+ * 6. **动作与收尾分开报错**：收尾（刷新详情 / 跳回列表）失败时动作其实
+ *    已经成功了，这时要说「操作已完成」，不能报「操作失败」——
+ *    后者会让师傅以为没拒成功、白点一次。
+ * 7. **拒单失败弹窗不关**：原因保留、后端原话显示在弹窗里，
+ *    师傅能直接再点一次「确认拒单」重试，不用重填原因。
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -120,6 +126,13 @@ function isOrderSideConflict(err: unknown): boolean {
 /**
  * 做一个订单动作。
  *
+ * **动作与收尾分开 catch**：两者的失败含义完全不同。
+ *
+ * - 动作失败 = 这次操作没生效，用户需要知道后端为什么拒绝；
+ * - 收尾失败 = 动作**已经成功了**，只是页面没跟上（比如拒单成功后
+ *   跳列表的导航挂了）。这时报「操作失败」是骗人的：后端已经把单退回
+ *   PENDING_DISPATCH，师傅再点一次「确认拒单」只会得到第二次失败。
+ *
  * @param action 真正发请求的动作
  * @param onSuccess 成功后的收尾：接单/开工/完工要刷新详情，拒单要跳回列表
  */
@@ -135,22 +148,33 @@ async function act(
   busy.value = true;
   actionError.value = "";
   try {
-    await action();
-    await onSuccess?.();
-  } catch (err) {
-    if (isOrderSideConflict(err)) {
-      // 订单侧冲突（404）：带上后端原话，再刷新一次拿真实状态。
-      // 刷新只动 loadError，**不会把 actionError 冲掉**——
-      // 用户还得看到后端那句话（不然就只剩一句「状态变了」）。
-      actionError.value = errorMessage(err, "订单状态已变化");
-      await load();
-    } else {
-      // 409（师傅当前不可接单）/ 500 等：**不刷新**。
-      // 409 的话订单状态没变，刷新学不到东西，只会把真正的原因盖住；
-      // 500 更没理由刷新。动作按钮照常留着（loadError 是空的），
-      // 因为后端明确允许停用 / 休假的师傅**拒单**——那是他把手上的单退回去的
-      // 唯一出路，藏掉按钮等于把单卡死在他手上。
-      actionError.value = errorMessage(err, "操作失败，请重试");
+    try {
+      await action();
+    } catch (err) {
+      if (isOrderSideConflict(err)) {
+        // 订单侧冲突（404）：带上后端原话，再刷新一次拿真实状态。
+        // 刷新只动 loadError，**不会把 actionError 冲掉**——
+        // 用户还得看到后端那句话（不然就只剩一句「状态变了」）。
+        actionError.value = errorMessage(err, "订单状态已变化");
+        await load();
+      } else {
+        // 409（师傅当前不可接单）/ 500 等：**不刷新**。
+        // 409 的话订单状态没变，刷新学不到东西，只会把真正的原因盖住；
+        // 500 更没理由刷新。动作按钮照常留着（loadError 是空的），
+        // 因为后端明确允许停用 / 休假的师傅**拒单**——那是他把手上的单退回去的
+        // 唯一出路，藏掉按钮等于把单卡死在他手上。
+        actionError.value = errorMessage(err, "操作失败，请重试");
+      }
+      // 动作本身失败了：收尾不该跑（收尾是给成功后的状态做的）。
+      return;
+    }
+
+    // 动作成功了才做收尾。收尾失败（刷新详情 / 跳回列表出错）**不是操作失败**——
+    // 动作已经生效了，报「操作失败」会让用户以为没成功、白点一次。
+    try {
+      await onSuccess?.();
+    } catch (err) {
+      actionError.value = "操作已完成，但页面没能自动更新，请点「返回列表」";
     }
   } finally {
     busy.value = false;
@@ -176,12 +200,18 @@ async function finish(): Promise<void> {
  * 成功之后**绝对不能刷新详情**：后端把订单退回 PENDING_DISPATCH 并清空
  * master_id，这单已经不属于我了，详情接口会 404（刷新 = 白屏 + 404）。
  * 所以改成记一条回执（「已拒单」）然后跳回列表。
+ *
+ * **失败时弹窗不关**：关掉的话用户得重新打开弹窗、重填一遍原因
+ * （RejectPopup 每次打开都清空输入），才能知道刚才到底成没成。
+ * 留在原地 + 保留原因 = 用户能直接再点一次「确认拒单」重试。
+ * 后端原话显示在弹窗里（用户视线所在处），不写在页面顶部。
  */
 async function reject(reason: string): Promise<void> {
-  rejectVisible.value = false;
   await act(
     () => api.rejectOrder({ order_no: orderNo.value }, { reason }),
     async () => {
+      // 到这里说明动作成功了：这时才关弹窗（失败的话弹窗要留着重试）
+      rejectVisible.value = false;
       setNotice("已拒单");
       // 用 replace 而不是 push：这单已经 404 了，留着历史记录的话
       // 用户一按后退就又撞回 404。
@@ -211,8 +241,15 @@ function goList(): void {
     <!--
       错误块：两个错误源互斥（v-if / v-else-if），「返回列表」按钮
       永远只出现一次。订单内容在下面照常渲染 —— 出错时页面不白屏。
+
+      `&& !rejectVisible`：拒单失败时错误显示在**弹窗里**（用户视线所在处），
+      页面顶部就别再重复同一句话了。
     -->
-    <div v-if="actionError" class="page-block" data-test="action-error">
+    <div
+      v-if="actionError && !rejectVisible"
+      class="page-block"
+      data-test="action-error"
+    >
       <p class="page-error" data-test="action-error-text">{{ actionError }}</p>
       <van-button
         size="small"
@@ -339,6 +376,14 @@ function goList(): void {
       </div>
     </template>
 
-    <RejectPopup v-model:show="rejectVisible" @confirm="reject" />
+    <!--
+      拒单弹窗：后端原话透传进弹窗（用户视线所在处）。
+      列表页不传这个 prop，行为不变。
+    -->
+    <RejectPopup
+      v-model:show="rejectVisible"
+      :server-error="actionError"
+      @confirm="reject"
+    />
   </div>
 </template>
