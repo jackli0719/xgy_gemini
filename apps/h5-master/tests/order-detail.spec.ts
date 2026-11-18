@@ -3,14 +3,28 @@
  *
  * 顺手钉住：详情带客户联系方式与上门地址（师傅要上门），
  * 以及「按状态给按钮」——不该出现的按钮不出现。
+ *
+ * UI-M2 打磨的重点（这里每条都有一个用例钉着）：
+ *
+ * 1. **拒单成功 -> 跳回列表 + 提示「已拒单」**：
+ *    后端拒单后把订单退回 PENDING_DISPATCH、清空 master_id，
+ *    这单已经不属于师傅了，详情接口必然 404。
+ *    所以拒单后**不能再刷新详情**，只能跳回列表（并显示一条回执）。
+ * 2. **连点两次只发一次请求**：光靠 disabled 拦不住（两次点击之间
+ *    Vue 还没 patch 出 disabled），必须有同步守卫。
+ * 3. **动作失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容还在。
+ * 4. **按钮按状态给**：非当前状态不显示对应按钮。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import App from "@/App.vue";
 import OrderDetailView from "@/views/OrderDetailView.vue";
+import { clearNotice } from "@/utils/notice";
+import { ApiError } from "@oto/shared/api";
 
 import { mockClient } from "./client-mock";
-import { setupApp } from "./helpers";
+import { setupApp, waitForPath } from "./helpers";
 
 vi.mock("@oto/shared/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@oto/shared/api")>();
@@ -38,14 +52,26 @@ function detail(status: "PENDING_ACCEPT" | "ACCEPTED" | "IN_SERVICE") {
   };
 }
 
+/** 空列表（列表页三个分组都用它）。 */
+const EMPTY_LIST = { items: [], total: 0, limit: 20, offset: 0 };
+
 describe("订单详情页（师傅端）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // 回执是模块级单例，用例之间得清干净（否则提示会串到下一个用例）
+    clearNotice();
     mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
     mockClient.startService.mockResolvedValue({
       order_no: "OTO20260101000001",
       status: "IN_SERVICE",
       completed_at: null,
+    });
+    mockClient.listMasterOrders.mockResolvedValue(EMPTY_LIST);
+    mockClient.getMasterProfile.mockResolvedValue({
+      real_name: "张师傅",
+      provider_name: "甲服务商",
+      status: "ACTIVE",
+      rating: "4.5",
     });
   });
 
@@ -89,5 +115,207 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
+  });
+
+  // ===================================================================
+  // UI-M2：拒单后不回详情（详情必然 404）
+  // ===================================================================
+
+  it("拒单成功 -> 跳回列表并提示「已拒单」（不出现 404，也不刷新详情）", async () => {
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    mockClient.rejectOrder.mockResolvedValue({
+      order_no: "OTO20260101000001",
+      status: "PENDING_DISPATCH",
+      master_id: null,
+    });
+
+    // 挂整个应用：router-view 会真的渲染列表页，才能断言那条回执
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(App, { global: { plugins: [pinia, router] } });
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(true);
+    });
+
+    const detailCallsBefore = mockClient.getMasterOrder.mock.calls.length;
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    await waitForPath(router, "/orders");
+    await flushPromises();
+
+    // 回到列表页
+    expect(router.currentRoute.value.path).toBe("/orders");
+    // 列表页顶部显示「已拒单」
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-test="notice"]').exists()).toBe(true);
+    });
+    expect(wrapper.find('[data-test="notice"]').text()).toContain("已拒单");
+
+    // 没有 404 / 错误块（详情接口根本没再被调用，谈不上 404）
+    expect(wrapper.find('[data-test="error"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="action-error"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="error-block"]').exists()).toBe(false);
+
+    // **拒单后不能再拉详情**：这单已经不属于师傅了，拉了必然 404
+    expect(mockClient.getMasterOrder.mock.calls.length).toBe(detailCallsBefore);
+  });
+
+  it("拒单失败 -> 留在详情页，显示后端原话 + 返回列表按钮", async () => {
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    mockClient.rejectOrder.mockRejectedValue(
+      new ApiError(500, "拒单失败，请稍后再试", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    // 还在详情页（没跳走）
+    expect(router.currentRoute.value.path).toBe("/orders/OTO20260101000001");
+    // 显示后端原话 + 返回列表按钮
+    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
+      "拒单失败，请稍后再试",
+    );
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+    // 订单内容还在（不白屏）
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+  });
+
+  // ===================================================================
+  // UI-M2：防连点
+  // ===================================================================
+
+  it("连点两次「开始服务」只发一次请求", async () => {
+    mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
+    // 请求挂住不返回：好观察「在途」这个中间态
+    let release: (value: unknown) => void = () => {};
+    mockClient.startService.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    const button = wrapper.find('[data-test="start-button"]');
+    // 两次点击**之间不 await**：真实场景就是用户连点，
+    // 这时 Vue 还没 patch 出 disabled，第二次点击照样进得来。
+    button.trigger("click");
+    button.trigger("click");
+    await flushPromises();
+
+    expect(mockClient.startService).toHaveBeenCalledTimes(1);
+
+    // 请求在途：按钮是 loading + disabled 的状态
+    const pending = wrapper.find('[data-test="start-button"]');
+    expect(pending.attributes("disabled")).toBeDefined();
+    expect(pending.classes()).toContain("van-button--loading");
+
+    release({
+      order_no: "OTO20260101000001",
+      status: "IN_SERVICE",
+      completed_at: null,
+    });
+    await flushPromises();
+  });
+
+  // ===================================================================
+  // UI-M2：动作失败不白屏
+  // ===================================================================
+
+  it("动作失败（409）-> 显示后端原话 + 返回列表按钮，订单内容还在", async () => {
+    mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
+    mockClient.startService.mockRejectedValue(
+      new ApiError(409, "订单状态已变", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="start-button"]').trigger("click");
+    await flushPromises();
+
+    // 后端原话
+    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
+      "订单状态已变",
+    );
+    // 「返回列表」按钮
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="back-to-list"]').text()).toContain("返回列表");
+    // 不白屏：订单内容还在
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+  });
+
+  it("详情接口 404（订单不存在）-> 显示后端原话 + 返回列表按钮", async () => {
+    mockClient.getMasterOrder.mockRejectedValue(
+      new ApiError(404, "订单不存在", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="error"]').text()).toContain("订单不存在");
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="back-to-list"]').text()).toContain("返回列表");
+    // 出错时不该同时冒出两个「返回列表」按钮
+    expect(wrapper.findAll('[data-test="back-to-list"]')).toHaveLength(1);
+  });
+
+  // ===================================================================
+  // UI-M2：按钮按订单状态给
+  // ===================================================================
+
+  it("非当前状态不显示对应按钮", async () => {
+    // 已接单：只给「开始服务」
+    mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
+    let { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    let wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="finish-button"]').exists()).toBe(false);
+    // 只给一组按钮，不多不少
+    expect(wrapper.findAll(".page-footer button")).toHaveLength(1);
+
+    // 待接单：只给「接单 / 拒单」
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    ({ pinia, router } = await setupApp("/orders/OTO20260101000001"));
+    wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="finish-button"]').exists()).toBe(false);
+    expect(wrapper.findAll(".page-footer button")).toHaveLength(2);
+
+    // 服务中：只给「完成服务」
+    mockClient.getMasterOrder.mockResolvedValue(detail("IN_SERVICE"));
+    ({ pinia, router } = await setupApp("/orders/OTO20260101000001"));
+    wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-test="finish-button"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(false);
+    expect(wrapper.findAll(".page-footer button")).toHaveLength(1);
   });
 });
