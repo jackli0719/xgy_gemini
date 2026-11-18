@@ -14,13 +14,17 @@
  *    Vue 还没 patch 出 disabled），必须有同步守卫。
  * 3. **动作失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容还在。
  * 4. **按钮按状态给**：非当前状态不显示对应按钮。
+ * 5. **状态冲突才刷新详情**：409 / 404 之后拉一次拿真实状态，
+ *    500 之类的普通失败不刷新（用例把两种分支的行为差异钉住）。
+ * 6. **刷新失败就不给动作按钮**：刷新失败 = 状态不可信，
+ *    再给按钮等于给一个必然再撞一次 404 的死按钮。
  */
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App.vue";
 import OrderDetailView from "@/views/OrderDetailView.vue";
-import { clearNotice } from "@/utils/notice";
+import { clearNotice, setNotice, takeNotice } from "@/utils/notice";
 import { ApiError } from "@oto/shared/api";
 
 import { mockClient } from "./client-mock";
@@ -57,7 +61,9 @@ const EMPTY_LIST = { items: [], total: 0, limit: 20, offset: 0 };
 
 describe("订单详情页（师傅端）", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // reset（不是 clear）：还得把 mockOnce 的队列清掉，
+    // 否则上一个用例没用完的一次性返回值会串到下一个用例。
+    vi.resetAllMocks();
     // 回执是模块级单例，用例之间得清干净（否则提示会串到下一个用例）
     clearNotice();
     mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
@@ -236,8 +242,14 @@ describe("订单详情页（师傅端）", () => {
   // UI-M2：动作失败不白屏
   // ===================================================================
 
-  it("动作失败（409）-> 显示后端原话 + 返回列表按钮，订单内容还在", async () => {
-    mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
+  it("动作失败（409 状态冲突）-> 刷新详情，按钮跟着真实的新状态走", async () => {
+    // **分两次返回不同状态**：第一次是页面初始的 ACCEPTED，
+    // 第二次是冲突后刷新拿到的真实状态 IN_SERVICE。
+    // 只回一个状态的话，刷新这个行为根本钉不住（按钮不会变），
+    // 把 409 改成 418 用例也照样全绿。
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("ACCEPTED"))
+      .mockResolvedValueOnce(detail("IN_SERVICE"));
     mockClient.startService.mockRejectedValue(
       new ApiError(409, "订单状态已变", null),
     );
@@ -256,6 +268,62 @@ describe("订单详情页（师傅端）", () => {
     // 「返回列表」按钮
     expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
     expect(wrapper.find('[data-test="back-to-list"]').text()).toContain("返回列表");
+    // 不白屏：订单内容还在
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+
+    // **确实刷新过**：初始 1 次 + 冲突后刷新 1 次
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+    // 刷新成功后按钮跟着真实状态走：ACCEPTED -> IN_SERVICE = 「完成服务」
+    expect(wrapper.find('[data-test="finish-button"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
+  });
+
+  it("动作失败（500，不是状态冲突）-> 不刷新详情", async () => {
+    mockClient.getMasterOrder.mockResolvedValue(detail("ACCEPTED"));
+    mockClient.startService.mockRejectedValue(
+      new ApiError(500, "服务器开小差了，请稍后再试", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="start-button"]').trigger("click");
+    await flushPromises();
+
+    // 后端原话
+    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
+      "服务器开小差了",
+    );
+    // **500 不是状态冲突**：不刷新详情（只有初始那 1 次）。
+    // 这条用例跟上面那条 409 的用例一起，把两个分支的行为差异钉住。
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("动作失败（404）且刷新详情也 404 -> 不给动作按钮，内容不白屏", async () => {
+    // 动作 404（订单不存在 / 不是我的单）之后会再拉一次详情，
+    // 这次刷新也 404 -> 状态不可信 -> 死按钮不给。
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("ACCEPTED"))
+      .mockRejectedValueOnce(new ApiError(404, "订单不存在", null));
+    mockClient.startService.mockRejectedValue(
+      new ApiError(404, "订单不存在", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="start-button"]').trigger("click");
+    await flushPromises();
+
+    // 后端原话 + 返回列表按钮（用户有出路）
+    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
+      "订单不存在",
+    );
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+    // **死按钮不给**：刷新失败了还挂「开始服务」，用户点了只会再撞一次 404
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(false);
     // 不白屏：订单内容还在
     expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
@@ -317,5 +385,18 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(false);
     expect(wrapper.findAll(".page-footer button")).toHaveLength(1);
+  });
+
+  // ===================================================================
+  // UI-M2：回执只出现一次
+  // ===================================================================
+
+  it("回执只出现一次：takeNotice 读到即清空（消费后不再有残留）", () => {
+    // beforeEach 已经 clearNotice() 复位了
+    setNotice("已拒单");
+    // 第一次读到
+    expect(takeNotice()).toBe("已拒单");
+    // 第二次取不到 = 已经被消费掉，列表页不会看到残留
+    expect(takeNotice()).toBe("");
   });
 });

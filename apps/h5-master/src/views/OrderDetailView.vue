@@ -18,6 +18,8 @@
  * 2. **连点只发一次请求**：同步 ref 守住（不只靠 disabled），
  *    两次点击之间 Vue 还没 patch 出 disabled，光靠按钮禁用拦不住。
  * 3. **失败不白屏**：显示后端原话 + 「返回列表」按钮，订单内容照旧在页面上。
+ * 4. **刷新失败就不给动作按钮**：刷新失败 = 订单状态不可信，
+ *    这时候还挂「开始服务」按钮，用户点了也只会再撞一次 404 / 409。
  */
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -58,6 +60,22 @@ const rejectVisible = ref(false);
 const canAccept = computed(() => order.value?.status === "PENDING_ACCEPT");
 const canStart = computed(() => order.value?.status === "ACCEPTED");
 const canFinish = computed(() => order.value?.status === "IN_SERVICE");
+
+/**
+ * 能不能给动作按钮。
+ *
+ * **刷新失败 = 状态不可信 = 不给动作按钮**：
+ * 动作返回 404 之后代码会再拉一次详情；如果这次刷新也 404，
+ * `order` 里还留着旧值，模板照样按旧状态渲染「开始服务」——
+ * 用户可以再点一次、再撞一次 404。
+ *
+ * 这里的 `loadError` 非空就是「我们没确认这单还在」，
+ * 这时候给按钮等于给一个必然失败的按钮。
+ *
+ * 注意别误伤：409 冲突后**刷新成功**时 loadError 是空的，
+ * 按钮照常给（而且状态要跟着刷新后的新状态走）。
+ */
+const canAct = computed(() => Boolean(order.value) && loadError.value === "");
 
 onMounted(load);
 
@@ -235,49 +253,56 @@ function goList(): void {
           服务中 -> 完成服务。**其他状态一个按钮都不给**
           （给了也是 409，白白让用户点一次）。
         -->
-        <template v-if="canAccept">
+        <!--
+          canAct：详情刷新失败时**整个按钮组都不给**。
+          理由：刷新失败 = 状态不可信 = 点了也只会再撞一次 404 / 409
+          （订单内容照旧在页面上，不白屏；错误块里有「返回列表」）。
+        -->
+        <template v-if="canAct">
+          <template v-if="canAccept">
+            <van-button
+              type="primary"
+              block
+              :loading="busy"
+              :disabled="busy"
+              data-test="accept-button"
+              @click="accept"
+            >
+              接单
+            </van-button>
+            <van-button
+              block
+              :loading="busy"
+              :disabled="busy"
+              data-test="reject-button"
+              @click="rejectVisible = true"
+            >
+              拒单
+            </van-button>
+          </template>
           <van-button
+            v-else-if="canStart"
             type="primary"
             block
             :loading="busy"
             :disabled="busy"
-            data-test="accept-button"
-            @click="accept"
+            data-test="start-button"
+            @click="start"
           >
-            接单
+            开始服务
           </van-button>
           <van-button
+            v-else-if="canFinish"
+            type="primary"
             block
             :loading="busy"
             :disabled="busy"
-            data-test="reject-button"
-            @click="rejectVisible = true"
+            data-test="finish-button"
+            @click="finish"
           >
-            拒单
+            完成服务
           </van-button>
         </template>
-        <van-button
-          v-else-if="canStart"
-          type="primary"
-          block
-          :loading="busy"
-          :disabled="busy"
-          data-test="start-button"
-          @click="start"
-        >
-          开始服务
-        </van-button>
-        <van-button
-          v-else-if="canFinish"
-          type="primary"
-          block
-          :loading="busy"
-          :disabled="busy"
-          data-test="finish-button"
-          @click="finish"
-        >
-          完成服务
-        </van-button>
       </div>
     </template>
 

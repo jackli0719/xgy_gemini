@@ -3,7 +3,7 @@
  *
  * **为什么不用 pinia**：session store 的约定是只放 token 与 currentUser，
  * 回执不是会话状态——它是一次性的操作结果，用完即扔。
- * 放模块级单例最简单：谁都能写，只有列表页读一次。
+ * 放模块级单例最简单：详情页写一条，只有列表页读一次（读完即清空）。
  *
  * 典型用法：详情页拒单成功后写一条「已拒单」，然后跳回列表；
  * 列表页在 setup 里把这条回执取走，渲染一条提示条。
@@ -21,12 +21,13 @@ export function setNotice(text: string): void {
   notice.value = text;
 }
 
-/** 读回执（不消费）。 */
-export function getNotice(): string {
-  return notice.value;
-}
-
-/** 清掉回执。 */
+/**
+ * 清掉回执。
+ *
+ * **只给测试用**：回执是模块级单例，用例之间得清干净，
+ * 否则上一个用例写的回执会串到下一个用例。
+ * 生产代码不用它——生产代码走 takeNotice()，读到即清空。
+ */
 export function clearNotice(): void {
   notice.value = "";
 }
