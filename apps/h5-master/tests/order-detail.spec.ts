@@ -58,6 +58,12 @@
  *     「请填写拒单原因」，但用户把原因填上之后那条错误就该消失——
  *     一条已经不成立的错误提示留着，会和后端原话并排显示；
  *     关掉弹窗再打开，也不该把上一次的校验错误带过来。
+ * 20. **组件卸载后不再导航**：拒单请求在途时用户自己离开了详情页
+ *     （后退 / 切到别的路由），请求回来后**不能**再把用户拽回订单列表——
+ *     用户明明是自己走的。回执照写（单确实被拒了）。
+ * 21. **404 分两种情况**：刷新成功（这单还在、只是状态变了）-> 关掉弹窗，
+ *     页面顶部给后端原话 + 「已刷新最新状态」，别让人再点一次注定失败的
+ *     动作；刷新失败（连这单都没了）-> 弹窗留着，用户可以原地重试。
  */
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -329,6 +335,72 @@ describe("订单详情页（师傅端）", () => {
 
     // **拒单后不能再拉详情**：这单已经不属于师傅了，拉了必然 404
     expect(mockClient.getMasterOrder.mock.calls.length).toBe(detailCallsBefore);
+  });
+
+  it("拒单请求在途 -> 用户自己离开了详情页（组件卸载）-> 请求回来不再跳列表", async () => {
+    // 拒单请求在途时用户按了后退 / 切到了别的路由：详情页组件被卸载了，
+    // 但请求的续行照样会跑。这时候还去 `router.replace("/orders")`
+    // = 把用户从他刚去的页面（比如「申请入驻」）硬拽回订单列表。
+    //
+    // 用户的直觉是「我自己走的，别拽我」。
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    // 拒单请求挂住不返回：好观察「在途」这个中间态
+    let release: (value: unknown) => void = () => {};
+    mockClient.rejectOrder.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    // 用户会切到的那个页面（申请入驻）要用的接口
+    mockClient.getMyOnboarding.mockRejectedValue(
+      new ApiError(404, "还没有申请", null),
+    );
+    mockClient.listJoinableProviders.mockResolvedValue({ items: [] });
+
+    // 挂整个应用：这样切路由时详情页组件才会真的被卸载。
+    // 从列表页进详情（顺带把列表的 chunk 加载了：后面那条「导航回列表」
+    // 的断言要能立刻看到路径变化，不能等懒加载）。
+    const { pinia, router } = await setupApp("/orders");
+    const wrapper = mount(App, { global: { plugins: [pinia, router] } });
+    await waitForPath(router, "/orders");
+    await router.push("/orders/OTO20260101000001");
+    await waitForPath(router, "/orders/OTO20260101000001");
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(true);
+    });
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+    expect(mockClient.rejectOrder).toHaveBeenCalledTimes(1);
+
+    // **用户自己走了**：切到「申请入驻」-> 详情页组件被卸载
+    await router.push("/onboard");
+    await waitForPath(router, "/onboard");
+    await flushPromises();
+    expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(false);
+
+    // 从这里开始，任何导航都是「把用户拽走」——盯住它
+    const pushSpy = vi.spyOn(router, "push");
+    const replaceSpy = vi.spyOn(router, "replace");
+
+    // 请求回来（后端确实把单拒了）
+    release({
+      order_no: "OTO20260101000001",
+      status: "PENDING_DISPATCH",
+      master_id: null,
+    });
+    await flushPromises();
+
+    // **不能再把用户拽回订单列表**：他现在在 /onboard，就该留在 /onboard
+    expect(router.currentRoute.value.path).toBe("/onboard");
+    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(pushSpy).not.toHaveBeenCalled();
+    // 回执照写：单确实被拒了，用户下次回列表会看到「已拒单」
+    expect(takeNotice()).toBe("已拒单");
   });
 
   it("拒单失败 -> 留在详情页，弹窗不关、原因保留，后端原话显示在弹窗里", async () => {
@@ -943,6 +1015,64 @@ describe("订单详情页（师傅端）", () => {
       "订单不存在",
     );
     expect(wrapper.findAll('[data-test="back-to-list"]')).toHaveLength(1);
+  });
+
+  it("拒单 404 但刷新成功（这单还在，只是状态变了）-> 关掉弹窗，顶部给后端原话 + 已刷新最新状态", async () => {
+    // 拒单返回 404 之后会再拉一次详情。**刷新成功**说明这单还在，
+    // 只是**这次动作已经不适用了**（比如已经在另一端被接单了）。
+    //
+    // 这时候弹窗留着是个坑：
+    // - 弹窗里挂着的「订单不存在」跟刚成功的刷新**自相矛盾**
+    //   （页面背后已经显示「已接单」了）；
+    // - 「确认拒单」还能点 -> 再发一次注定 404 的拒单 + 一次刷新，
+    //   用户在无限无效循环里打转。
+    //
+    // 所以刷新成功就关掉弹窗，让用户回列表看最新状态。
+    // （刷新失败 = 连这单都没了 -> 弹窗留着让用户原地重试，
+    //   那是上面那条用例钉住的行为。）
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("PENDING_ACCEPT"))
+      .mockResolvedValueOnce(detail("ACCEPTED"));
+    mockClient.rejectOrder.mockRejectedValue(
+      new ApiError(404, "订单不存在：order_no=OTO20260101000001", null),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    // 确实刷新过（首屏 1 次 + 冲突后刷新 1 次）
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+
+    // **弹窗关掉了**：留着只会让人再点一次、再撞一次注定失败的 404
+    expect(rejectPopupOpen(wrapper)).toBe(false);
+
+    // 页面顶部显示后端原话（**原样带上**）+「已刷新最新状态」
+    const text = wrapper.find('[data-test="action-error-text"]').text();
+    expect(text).toContain("订单不存在");
+    expect(text).toContain("已刷新最新状态");
+    // 用户有出路：返回列表
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+
+    // 页面状态跟着刷新后的新状态走：PENDING_ACCEPT -> ACCEPTED = 「开始服务」
+    expect(wrapper.find('[data-test="start-button"]').exists()).toBe(true);
+    expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(false);
+
+    // 再打开弹窗不会带着上一次的错误（openReject 会先清掉）。
+    // 状态已经变成 ACCEPTED，页面上「拒单」按钮已经不在了（按钮跟着
+    // 新状态走），所以这里直接调 openReject()——它才是「重新打开
+    // 弹窗」的那一步。
+    (wrapper.vm as unknown as { openReject: () => void }).openReject();
+    await flushPromises();
+    expect(rejectPopupOpen(wrapper)).toBe(true);
+    expect(wrapper.find('[data-test="reject-server-error"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="action-error"]').exists()).toBe(false);
   });
 
   it("详情接口 404（订单不存在）-> 显示后端原话 + 返回列表按钮", async () => {
