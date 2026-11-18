@@ -663,6 +663,9 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="reject-error"]').text()).toContain(
       "请填写拒单原因",
     );
+    // **不发请求**：原因是必填的（后端也要求非空），空原因点确认
+    // 只能在本地拦下来——真发出去就是一次注定被拒的请求。
+    expect(mockClient.rejectOrder).not.toHaveBeenCalled();
 
     // 原因填上了 → 那条校验错误不再成立 → 消失
     await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
@@ -685,6 +688,8 @@ describe("订单详情页（师傅端）", () => {
     await wrapper.find('[data-test="reject-confirm"]').trigger("click");
     await flushPromises();
     expect(wrapper.find('[data-test="reject-error"]').exists()).toBe(true);
+    // 空原因**不发请求**（必填项要在本地拦下来）
+    expect(mockClient.rejectOrder).not.toHaveBeenCalled();
 
     // 关掉弹窗（取消），再打开
     await wrapper.find('[data-test="reject-cancel"]').trigger("click");
