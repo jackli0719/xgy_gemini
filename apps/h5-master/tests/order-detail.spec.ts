@@ -84,6 +84,9 @@
  *     重拉详情解决不了「这次动作被拒」，那种情况只给「返回列表」。
  * 26. **手动重试成功后旧横幅清掉**：页面状态已经更新成最新的了，
  *     顶部那句「订单不存在」还挂着就是自相矛盾。
+ * 27. **首屏的「重试」在途时也 disabled**：连点两次会并发发两次 GET，
+ *     后到的失败会把已经成功的加载盖掉（页面显示出订单、却一个动作按钮
+ *     都没有——状态被写成了不可信）。
  */
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1216,6 +1219,45 @@ describe("订单详情页（师傅端）", () => {
     // 成功后错误块消失，订单内容出来
     expect(wrapper.find('[data-test="error-block"]').exists()).toBe(false);
     expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
+  });
+
+  it("首屏加载失败点「重试」-> 请求在途时按钮 disabled（连点不会并发两次 GET）", async () => {
+    // 连点两次「重试」会并发发两个 GET：后到的失败会把已经成功的加载盖掉
+    // （页面显示出订单、却一个动作按钮都没有——状态被写成了不可信）。
+    // 所以请求在途时按钮必须 disabled。
+    let release: (value: unknown) => void = () => {};
+    // 第一次（首屏）失败 -> 错误块出现；第二次（点「重试」）挂住不返回，
+    // 好观察「在途」这个中间态。
+    mockClient.getMasterOrder.mockRejectedValueOnce(
+      new TypeError("Failed to fetch"),
+    );
+    mockClient.getMasterOrder.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    mockClient.getMasterOrder.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    // 首屏失败 → 错误块里有「重试」
+    expect(wrapper.find('[data-test="retry"]').exists()).toBe(true);
+
+    await wrapper.find('[data-test="retry"]').trigger("click");
+    await flushPromises();
+
+    // 请求在途：按钮 disabled + loading
+    const retry = wrapper.find('[data-test="retry"]');
+    expect(retry.attributes("disabled")).toBeDefined();
+    expect(retry.classes()).toContain("van-button--loading");
+
+    // 放行收尾
+    release(detail("ACCEPTED"));
+    await flushPromises();
+    expect(wrapper.find('[data-test="error-block"]').exists()).toBe(false);
   });
 
   // ===================================================================
