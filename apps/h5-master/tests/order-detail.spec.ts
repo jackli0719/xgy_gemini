@@ -44,11 +44,18 @@
  * 15. **刷新不盖住内容 / 旧错误不挂着**：动作成功后的刷新在途时
  *     不出现加载动画（订单内容还在）；一次成功动作之后，
  *     上一次动作失败留下的错误被清掉。
+ * 16. **拒单请求在途时关不掉弹窗**：请求已经发出去了，后端会把单真拒掉，
+ *     这时候「取消」/ 遮罩关闭都**不是撤销**，只是把结果藏起来
+ *     （用户以为取消了，实际单已经被拒 = 静默拒单）。
+ * 17. **刷新详情失败要说「操作已完成」**：接单 / 开工 / 完工**已经成功**，
+ *     只是随后的刷新挂了（比如这单已被收走 → GET 404）。
+ *     这时报「操作失败」会让师傅以为没生效、再点一次、再撞一次 404。
  */
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "@/App.vue";
+import RejectPopup from "@/components/RejectPopup.vue";
 import OrderDetailView from "@/views/OrderDetailView.vue";
 import { setNotice, takeNotice } from "@/utils/notice";
 import { ApiError } from "@oto/shared/api";
@@ -86,6 +93,23 @@ function detail(
 
 /** 空列表（列表页三个分组都用它）。 */
 const EMPTY_LIST = { items: [], total: 0, limit: 20, offset: 0 };
+
+/**
+ * 拒单弹窗是不是**还开着**。
+ *
+ * **不能只看 isVisible()**：van-popup 靠 v-show 关（display:none 打在
+ * 弹窗根节点上），而 VTU 的 isVisible() 在 jsdom 里**查不到祖先的
+ * display:none** —— 弹窗已经关了它照样返回 true（实测过）。
+ * 只用 isVisible() 断言「弹窗没被关掉」等于没断言。
+ *
+ * 所以这里看两样：show prop 还是 true，且弹窗根节点的 style 里
+ * 没有 display:none。
+ */
+function rejectPopupOpen(wrapper: VueWrapper): boolean {
+  const popup = wrapper.findComponent(RejectPopup);
+  const rootStyle = wrapper.find(".van-popup").attributes("style") ?? "";
+  return popup.props("show") === true && !rootStyle.includes("display: none");
+}
 
 describe("订单详情页（师傅端）", () => {
   beforeEach(() => {
@@ -312,9 +336,9 @@ describe("订单详情页（师傅端）", () => {
     expect(router.currentRoute.value.path).toBe("/orders/OTO20260101000001");
     // **弹窗还开着**：失败就关掉的话，用户得重新打开、重填一遍原因
     // （RejectPopup 每次打开都清空输入）才知道成没成
-    // 用 isVisible() 而不是 exists()：van-popup 关掉时只是 v-show 隐藏，
-    // 节点还留在 DOM 里，exists() 照样为 true（那这条断言等于没钉）
-    expect(wrapper.find('[data-test="reject-popup"]').isVisible()).toBe(true);
+    // 用 rejectPopupOpen()（不是 exists()：van-popup 关掉时只是 v-show 隐藏，
+    // 节点还留在 DOM 里，exists() 照样为 true，那这条断言等于没钉）
+    expect(rejectPopupOpen(wrapper)).toBe(true);
     // 后端原话显示在**弹窗里**（用户视线所在处），不在页面顶部
     expect(wrapper.find('[data-test="reject-server-error"]').isVisible()).toBe(
       true,
@@ -374,6 +398,67 @@ describe("订单详情页（师傅端）", () => {
     expect(confirmButton.classes()).toContain("van-button--loading");
     expect(confirmButton.attributes("disabled")).toBeDefined();
 
+    release({
+      order_no: "OTO20260101000001",
+      status: "PENDING_DISPATCH",
+      master_id: null,
+    });
+    await flushPromises();
+  });
+
+  it("拒单请求在途 -> 「取消」点不动、弹窗关不掉（取消不是撤销）", async () => {
+    // 请求发出后端就要把单拒掉。这时候用户点「取消」，弹窗是关了，
+    // 但请求还在跑 —— 请求成功之后后端照样把单拒了，页面还会跳回列表
+    // 显示「已拒单」。用户以为「取消 = 撤销」，实际单已经被拒了
+    // （静默拒单，用户完全不知情）。
+    //
+    // 所以请求在途时「取消」必须 disabled，弹窗也关不掉。
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    let release: (value: unknown) => void = () => {};
+    mockClient.rejectOrder.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    expect(mockClient.rejectOrder).toHaveBeenCalledTimes(1);
+
+    // 请求在途：「取消」按钮不可点
+    const cancelButton = wrapper.find('[data-test="reject-cancel"]');
+    expect(cancelButton.attributes("disabled")).toBeDefined();
+
+    // 点它：弹窗**不能**被关掉
+    await cancelButton.trigger("click");
+    await flushPromises();
+    expect(rejectPopupOpen(wrapper)).toBe(true);
+
+    // close() 自己也挡了一道（不只是 disabled 按钮）：
+    // VTU 的 trigger 对 disabled 元素会**跳过派发**，所以这里直接调
+    // close() —— 它在请求在途时必须什么都不做（少这一道，这条断言就废）。
+    const popup = wrapper.findComponent(RejectPopup);
+    const close = (popup.vm as unknown as { close: () => void }).close;
+    close();
+    await flushPromises();
+    expect(rejectPopupOpen(wrapper)).toBe(true);
+
+    // 遮罩那条关闭路径（van-popup 点遮罩也会要求关闭）同样关不掉：
+    // 只挡按钮不挡遮罩，等于同一个坑留了另一个入口
+    await wrapper.find(".van-overlay").trigger("click");
+    await flushPromises();
+    expect(rejectPopupOpen(wrapper)).toBe(true);
+
+    // 收尾：把请求放出去（成功后弹窗自己关掉）
     release({
       order_no: "OTO20260101000001",
       status: "PENDING_DISPATCH",
@@ -464,6 +549,49 @@ describe("订单详情页（师傅端）", () => {
     expect(text).not.toContain("操作失败");
     // 用户有出路：回列表
     expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+  });
+
+  it("接单成功但刷新详情失败 -> 说「操作已完成」并带后端原话", async () => {
+    // 接单**已经成功**（后端把单变成 ACCEPTED 了），只是随后的刷新详情挂了
+    // （这单在刷新之前被收走 → GET 详情 404）。
+    //
+    // 这时候报「操作失败」是骗人的：师傅会以为刚才那一下没生效，
+    // 可能再点一次、再撞一次 404（按钮已经因为 loadError 非空被藏了）。
+    // 所以主句必须是「操作已完成」，同时把后端原话带上。
+    mockClient.getMasterOrder
+      .mockResolvedValueOnce(detail("PENDING_ACCEPT"))
+      .mockRejectedValueOnce(
+        new ApiError(404, "订单不存在：order_no=OTO20260101000001", null),
+      );
+    mockClient.acceptOrder.mockResolvedValue({
+      order_no: "OTO20260101000001",
+      status: "ACCEPTED",
+    });
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="accept-button"]').trigger("click");
+    await flushPromises();
+
+    // 动作**已经成功**
+    expect(mockClient.acceptOrder).toHaveBeenCalledTimes(1);
+    // 刷新确实试过了（首屏 1 次 + 成功后刷新 1 次）
+    expect(mockClient.getMasterOrder).toHaveBeenCalledTimes(2);
+
+    const text = wrapper.find('[data-test="action-error-text"]').text();
+    // **主句说「已完成」**：动作已经生效了，不能报「操作失败」
+    expect(text).toContain("操作已完成");
+    expect(text).not.toContain("操作失败");
+    // **带上后端原话**（loadError 里就是它）：让师傅知道到底发生了什么
+    expect(text).toContain("订单不存在");
+    // 用户有出路：回列表
+    expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
+    // 刷新失败 = 状态不可信 = 死按钮不给（canAct 因 loadError 非空而 false）
+    expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(false);
+    // 不白屏：订单内容还在
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
 
   // ===================================================================

@@ -25,9 +25,12 @@
  *    （订单不存在 / 不是派给我的 / 状态已变）后端同构成一个 404，
  *    这时刷新才能拿到真实状态；409 是「师傅当前不可接单」
  *    （停用 / 休假 / 未审核），订单状态压根没变，刷新学不到东西，不刷新。
- * 6. **动作与收尾分开报错**：收尾（刷新详情 / 跳回列表）失败时动作其实
- *    已经成功了，这时要说「操作已完成」，不能报「操作失败」——
- *    后者会让师傅以为没拒成功、白点一次。
+ * 6. **动作与收尾分开报错**：动作成功了但收尾失败时，动作其实**已经生效**了，
+ *    这时要说「操作已完成」，不能报「操作失败」——后者会让师傅以为
+ *    没生效、白点一次（甚至再点一次、再撞一次 404）。
+ *    两种收尾失败要分开处理：**刷新详情失败**由 refreshAfterAction 自己
+ *    判断并补上「操作已完成」+ 后端原话；**跳回列表失败**由 act() 的
+ *    收尾 catch 兜底（拒单的收尾就是跳回列表）。
  * 7. **拒单失败弹窗不关**：原因保留、后端原话显示在弹窗里，
  *    师傅能直接再点一次「确认拒单」重试，不用重填原因。
  */
@@ -92,16 +95,49 @@ const canAct = computed(() => Boolean(order.value) && loadError.value === "");
 
 onMounted(load);
 
-async function load(): Promise<void> {
+/**
+ * 拉订单详情。
+ *
+ * 返回值告诉调用方**这次拉成功了还是失败了**（true = 成功）。
+ *
+ * 为什么要有这个返回值：load 自己 catch 掉了所有异常、**从不抛出**，
+ * 所以外面（收尾那一步）接不到任何失败信号，「刷新失败了」这件事
+ * 只有 load 自己知道。接单 / 开工 / 完工成功后要靠这个返回值区分
+ * 「刷新成功了」和「刷新失败了」——后者必须报「操作已完成」
+ * （动作已经生效），不能报「操作失败」。
+ *
+ * 失败时仍然会写 loadError（后端原话），页面照旧用错误块显示它。
+ */
+async function load(): Promise<boolean> {
   loading.value = true;
   loadError.value = "";
   try {
     order.value = await api.getMasterOrder({ order_no: orderNo.value });
+    return true;
   } catch (err) {
     // 业务错显示后端原话，网络错给统一文案（见 utils/error.ts）
     loadError.value = errorMessage(err, "订单加载失败");
+    return false;
   } finally {
     loading.value = false;
+  }
+}
+
+/**
+ * 动作成功之后的收尾：刷新详情（接单 / 开工 / 完工）。
+ *
+ * **刷新失败不是操作失败**：动作（接单 / 开工 / 完工）已经生效了，
+ * 只是页面没跟上——比如刷新时这单已经被收走，GET 详情直接 404。
+ * 这时报「操作失败」会让师傅以为刚才那一下没生效，可能再点一次、
+ * 再撞一次 404（而且按钮已经因为 loadError 非空被藏了，用户只能干瞪眼）。
+ *
+ * 所以主句要说清「已完成」，再把后端原话带上（loadError 里就是它），
+ * 让师傅知道到底是「操作没成」还是「页面没跟上」。
+ */
+async function refreshAfterAction(): Promise<void> {
+  const ok = await load();
+  if (!ok) {
+    actionError.value = `操作已完成，但页面没能自动更新：${loadError.value}，请点「返回列表」`;
   }
 }
 
@@ -134,7 +170,8 @@ function isOrderSideConflict(err: unknown): boolean {
  *   PENDING_DISPATCH，师傅再点一次「确认拒单」只会得到第二次失败。
  *
  * @param action 真正发请求的动作
- * @param onSuccess 成功后的收尾：接单/开工/完工要刷新详情，拒单要跳回列表
+ * @param onSuccess 成功后的收尾：接单/开工/完工要刷新详情（refreshAfterAction），
+ *                 拒单要跳回列表
  */
 async function act(
   action: () => Promise<unknown>,
@@ -169,8 +206,13 @@ async function act(
       return;
     }
 
-    // 动作成功了才做收尾。收尾失败（刷新详情 / 跳回列表出错）**不是操作失败**——
-    // 动作已经生效了，报「操作失败」会让用户以为没成功、白点一次。
+    // 动作成功了才做收尾。收尾失败**不是操作失败**——动作已经生效了，
+    // 报「操作失败」会让用户以为没成功、白点一次。
+    //
+    // 这个 catch 现在只接「跳回列表」这类失败（拒单的收尾）：
+    // 接单 / 开工 / 完工的收尾是 refreshAfterAction，它自己判断刷新
+    // 成功没成功，失败时把「操作已完成」写进 actionError、**不抛**，
+    // 所以那条路走不到这里。
     try {
       await onSuccess?.();
     } catch (err) {
@@ -183,15 +225,22 @@ async function act(
 
 async function accept(): Promise<void> {
   // 接单成功：状态变了，重新拉一次详情，状态标签与按钮跟着变
-  await act(() => api.acceptOrder({ order_no: orderNo.value }), load);
+  // （刷新失败由 refreshAfterAction 报「操作已完成」，不是「操作失败」）
+  await act(
+    () => api.acceptOrder({ order_no: orderNo.value }),
+    refreshAfterAction,
+  );
 }
 
 async function start(): Promise<void> {
-  await act(() => api.startService({ order_no: orderNo.value }), load);
+  await act(() => api.startService({ order_no: orderNo.value }), refreshAfterAction);
 }
 
 async function finish(): Promise<void> {
-  await act(() => api.finishService({ order_no: orderNo.value }), load);
+  await act(
+    () => api.finishService({ order_no: orderNo.value }),
+    refreshAfterAction,
+  );
 }
 
 /**

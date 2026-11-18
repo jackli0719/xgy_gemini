@@ -7,6 +7,12 @@
  *
  * 原因由**师傅自己填**，这里只做非空校验——后端也要求非空。
  *
+ * **请求在途时不许关弹窗**：拒单请求一旦发出，后端就把单真拒掉了。
+ * 这时候关弹窗（点「取消」/ 点遮罩 / 下滑）**不是撤销**，只是把结果
+ * 藏起来——用户以为「取消了这单」，实际单已经被拒，用户完全不知情
+ * （静默拒单）。所以 loading 为真时「取消」按钮 disabled，
+ * 遮罩那条关闭路径也一并挡掉。
+ *
  * teleport=null：内容就地渲染，不传送到 body。
  * 传送到 body 的话，测试里 wrapper 根本找不到这个弹窗的内容。
  */
@@ -30,7 +36,10 @@ const props = defineProps<{
    * 拒单请求是**弹窗里的「确认拒单」按钮**发出的，所以「请求中」的
    * 反馈必须落在这个按钮上：loading + disabled，让用户知道
    * 「已经点下去了、在处理」，而不是以为没点上又点一次。
-   * 不传（列表页）时按钮外观完全不变。
+   *
+   * 同时它也是「**能不能关弹窗**」的依据：请求一旦发出，后端就会把单
+   * 真的拒掉，这时候关弹窗不是「撤销」，只是把结果藏起来（静默拒单）。
+   * 不传（列表页）时按钮外观与关闭行为完全不变。
    */
   loading?: boolean;
 }>();
@@ -55,7 +64,24 @@ watch(
 );
 
 function close(): void {
+  // 请求已发出，取消不是撤销——后端会把单真的拒掉。
+  // 这时候关掉弹窗，用户以为「取消了这单」，实际上单已经被拒了
+  // （静默拒单，用户完全不知情）。所以请求在途时不许关。
+  // 「取消」按钮已经 disabled 了，这里再挡一道：以后谁把那个 disabled
+  // 去掉，close() 也不会把关掉的弹窗放出去。
+  if (props.loading) return;
   emit("update:show", false);
+}
+
+/**
+ * 弹窗自己要求关闭（遮罩点击 / 下滑关闭）时的处理。
+ *
+ * 跟「取消」按钮走同一个判断：请求在途时**一律不许关**。
+ * 只挡按钮不挡遮罩，等于留了同一个坑的另一个入口。
+ */
+function onPopupShowChange(value: boolean): void {
+  if (!value && props.loading) return;
+  emit("update:show", value);
 }
 
 function confirm(): void {
@@ -74,7 +100,7 @@ function confirm(): void {
     position="bottom"
     round
     :teleport="null"
-    @update:show="emit('update:show', $event)"
+    @update:show="onPopupShowChange($event)"
   >
     <div class="reject-popup" data-test="reject-popup">
       <p class="reject-popup-title">拒单原因</p>
@@ -93,7 +119,14 @@ function confirm(): void {
         {{ serverError }}
       </p>
       <div class="reject-popup-actions">
-        <van-button data-test="reject-cancel" @click="close">取消</van-button>
+        <!--
+          「取消」在请求在途时 disabled：请求**已经发出去了**，取消不是撤销——
+          后端会把单真的拒掉。让按钮不可点，避免用户以为撤销了（静默拒单）。
+          真要撤销请求得用 AbortController 撤掉，那是另一件事。
+        -->
+        <van-button :disabled="loading" data-test="reject-cancel" @click="close">
+          取消
+        </van-button>
         <!--
           loading / disabled 都绑到「确认拒单」上：拒单请求是这个按钮发出的，
           请求在途时按钮外观要变（不然用户以为没点上）。
