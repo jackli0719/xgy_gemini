@@ -84,9 +84,10 @@
  *     重拉详情解决不了「这次动作被拒」，那种情况只给「返回列表」。
  * 26. **手动重试成功后旧横幅清掉**：页面状态已经更新成最新的了，
  *     顶部那句「订单不存在」还挂着就是自相矛盾。
- * 27. **首屏的「重试」在途时也 disabled**：连点两次会并发发两次 GET，
- *     后到的失败会把已经成功的加载盖掉（页面显示出订单、却一个动作按钮
- *     都没有——状态被写成了不可信）。
+ * 27. **首屏的「重试」在途时也 disabled + loading**：loading 期间 Vant 的
+ *     Button 不 emit click（人机点不到第二次，不会有并发的两个 GET），
+ *     disabled 是双保险。真要是并发了两个 GET，后到的失败会把已经成功的
+ *     加载盖掉（页面显示出订单、却一个动作按钮都没有——状态被写成了不可信）。
  */
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1221,10 +1222,14 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
 
-  it("首屏加载失败点「重试」-> 请求在途时按钮 disabled（连点不会并发两次 GET）", async () => {
-    // 连点两次「重试」会并发发两个 GET：后到的失败会把已经成功的加载盖掉
+  it("首屏加载失败点「重试」-> 请求在途时按钮 disabled + loading", async () => {
+    // 请求在途时按钮要 disabled + loading：
+    // - loading 期间 Vant 的 Button **不 emit click**（见 vant/es/button/Button.mjs
+    //   的 onClick：props.loading 为真时直接 preventDefault），
+    //   所以人机点不到第二次，不会有并发的两个 GET；
+    // - disabled 则是双保险（外加浏览器本身也不会派发点击）。
+    // 真要是并发了两个 GET，后到的失败会把已经成功的加载盖掉
     // （页面显示出订单、却一个动作按钮都没有——状态被写成了不可信）。
-    // 所以请求在途时按钮必须 disabled。
     let release: (value: unknown) => void = () => {};
     // 第一次（首屏）失败 -> 错误块出现；第二次（点「重试」）挂住不返回，
     // 好观察「在途」这个中间态。
