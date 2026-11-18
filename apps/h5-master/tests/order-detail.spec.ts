@@ -56,7 +56,8 @@
  *     就永久失效了）。
  * 19. **空值校验错误不会赖着不走**：空着原因点了「确认拒单」会提示
  *     「请填写拒单原因」，但用户把原因填上之后那条错误就该消失——
- *     一条已经不成立的错误提示留着，会和后端原话并排显示。
+ *     一条已经不成立的错误提示留着，会和后端原话并排显示；
+ *     关掉弹窗再打开，也不该把上一次的校验错误带过来。
  */
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -569,6 +570,32 @@ describe("订单详情页（师傅端）", () => {
     // 原因填上了 → 那条校验错误不再成立 → 消失
     await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
     await flushPromises();
+    expect(wrapper.find('[data-test="reject-error"]').exists()).toBe(false);
+  });
+
+  it("空原因点过确认 -> 关掉再打开弹窗，那条校验错误不残留", async () => {
+    // 弹窗每次打开都清空上一次的输入（免得把上一单的原因带给这一单），
+    // 同理也该清掉上一次的「请填写拒单原因」——
+    // 否则重新打开时还挂着一条已经不成立的错误。
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    // 打开弹窗 -> 空着原因点确认 -> 出现校验错误
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-test="reject-error"]').exists()).toBe(true);
+
+    // 关掉弹窗（取消），再打开
+    await wrapper.find('[data-test="reject-cancel"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+
+    // 重新打开时，那条校验错误不残留
     expect(wrapper.find('[data-test="reject-error"]').exists()).toBe(false);
   });
 
