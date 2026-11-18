@@ -35,9 +35,10 @@
  * 12. **打开拒单弹窗先清掉上一次的错误**：弹窗里显示的是后端原话，
  *     带着上一次动作（比如接单失败）的错误打开弹窗，用户会以为
  *     这次拒单也失败了。
- * 13. **同一句错误只显示一次**：拒单 404 且随后的刷新详情也 404 时，
- *     actionError 与 loadError 是同一句后端原话——弹窗里已经有一份，
- *     页面顶部就**一个都不渲染**（不重复显示）。
+ * 13. **同一句错误只显示一次**：两个错误源互斥（v-if / v-else-if），
+ *     actionError 与 loadError 同时非空时页面顶部只渲染一个块、
+ *     只有一个「返回列表」；非 404 的拒单失败时弹窗开着，
+ *     页面顶部**一个错误块都不渲染**（错误只在弹窗里出现一次）。
  * 14. **拒单请求在途**：真正发请求的是弹窗里的「确认拒单」按钮，
  *     它必须显示 loading + disabled（详情页上那个「拒单」按钮被弹窗
  *     挡住了，用户看不见它的 loading，会以为没点上）。
@@ -61,9 +62,15 @@
  * 20. **组件卸载后不再导航**：拒单请求在途时用户自己离开了详情页
  *     （后退 / 切到别的路由），请求回来后**不能**再把用户拽回订单列表——
  *     用户明明是自己走的。回执照写（单确实被拒了）。
- * 21. **404 分两种情况**：刷新成功（这单还在、只是状态变了）-> 关掉弹窗，
- *     页面顶部给后端原话 + 「已刷新最新状态」，别让人再点一次注定失败的
- *     动作；刷新失败（连这单都没了）-> 弹窗留着，用户可以原地重试。
+ * 21. **404 的两种子情况都关弹窗**：404 = 订单侧冲突 = 这次动作
+ *     **已经不适用了**（同一谓词、同一张单，再点一次只会再撞一次 404），
+ *     所以刷新成功 / 刷新失败**一律关掉弹窗**。
+ *     - 刷新成功（这单还在、只是状态变了）-> 页面顶部给后端原话
+ *       + **刷新后的真实状态** + 「这次操作已不适用」
+ *       （不然「订单不存在」跟同屏渲染的这单自相矛盾）。
+ *     - 刷新失败（连这单都没了）-> 页面顶部给后端原话 + 「重试」
+ *       + 「返回列表」（动作按钮不给：状态不可信）。
+ *     非 404 的失败（500）则是弹窗留着、原地重试（见第 11 条）。
  */
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -967,13 +974,14 @@ describe("订单详情页（师傅端）", () => {
     expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
 
-  it("拒单 404 且刷新详情也 404 -> 错误只在弹窗里出现一次，页面顶部不重复", async () => {
+  it("拒单 404 且刷新详情也 404 -> 关掉弹窗，页面顶部给后端原话 + 重试 + 返回列表", async () => {
     // 拒单返回 404（订单侧冲突）之后 act() 会再拉一次详情；
     // 这次刷新也 404 -> actionError 与 loadError 同时非空，
     // 而且是**同一句**后端原话（「订单不存在：order_no=…」）。
     //
-    // 弹窗开着的时候，页面顶部一个错误块都不渲染：
-    // 错误只在弹窗里出现一次（用户视线所在处），不重复显示。
+    // **弹窗关掉**：404 = 这次动作已经不适用了（同一谓词、同一张单，
+    // 再点一次「确认拒单」只会再撞一次 404）。页面上的动作按钮已经被
+    // canAct 藏掉，弹窗里的按钮不该是唯一的例外。
     mockClient.getMasterOrder
       .mockResolvedValueOnce(detail("PENDING_ACCEPT"))
       .mockRejectedValueOnce(
@@ -993,31 +1001,24 @@ describe("订单详情页（师傅端）", () => {
     await wrapper.find('[data-test="reject-confirm"]').trigger("click");
     await flushPromises();
 
-    // 后端原话在**弹窗里**（用户视线所在处），弹窗还开着（失败就关掉的话，
-    // 用户得重新打开、重填一遍原因才知道成没成）
-    expect(wrapper.find('[data-test="reject-popup"]').isVisible()).toBe(true);
-    const serverError = wrapper.find('[data-test="reject-server-error"]');
-    expect(serverError.isVisible()).toBe(true);
-    expect(serverError.text()).toContain("订单不存在");
+    // **弹窗关掉了**：再点一次只会再撞一次注定失败的 404
+    expect(rejectPopupOpen(wrapper)).toBe(false);
 
-    // **页面顶部不重复显示同一句**：两个错误块都不渲染
-    // （少了 loadError 那条链上的 !rejectVisible，这里就会多出
-    //  一个显示同一句话的 error-block + 「重试」）
-    expect(wrapper.find('[data-test="error-block"]').exists()).toBe(false);
-    expect(wrapper.find('[data-test="action-error"]').exists()).toBe(false);
-
-    // 关掉弹窗后，错误回到页面顶部 —— 此时「返回列表」仍然只有一个
-    // （两个错误块互斥；两块都渲染就是两个，用户不知道该点哪个）
-    await wrapper.find('[data-test="reject-cancel"]').trigger("click");
-    await flushPromises();
-
-    expect(wrapper.find('[data-test="action-error-text"]').text()).toContain(
-      "订单不存在",
-    );
+    // 页面顶部显示后端原话（两个错误源互斥，只显示一句）
+    const text = wrapper.find('[data-test="action-error-text"]').text();
+    expect(text).toContain("订单不存在");
+    // **两个出路**：重试（重新拉一次详情）+ 返回列表，各一个
+    // （两个错误块互斥，两块都渲染就是两个「返回列表」，用户不知道该点哪个）
+    expect(wrapper.findAll('[data-test="retry"]')).toHaveLength(1);
     expect(wrapper.findAll('[data-test="back-to-list"]')).toHaveLength(1);
+    // **死按钮不给**：刷新失败 = 状态不可信 = 点了也只会再撞一次 404
+    expect(wrapper.find('[data-test="accept-button"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="reject-button"]').exists()).toBe(false);
+    // 不白屏：订单内容还在
+    expect(wrapper.find('[data-test="order-no"]').exists()).toBe(true);
   });
 
-  it("拒单 404 但刷新成功（这单还在，只是状态变了）-> 关掉弹窗，顶部给后端原话 + 已刷新最新状态", async () => {
+  it("拒单 404 但刷新成功（这单还在，只是状态变了）-> 关掉弹窗，顶部给后端原话 + 现在的状态 + 已不适用", async () => {
     // 拒单返回 404 之后会再拉一次详情。**刷新成功**说明这单还在，
     // 只是**这次动作已经不适用了**（比如已经在另一端被接单了）。
     //
@@ -1027,9 +1028,9 @@ describe("订单详情页（师傅端）", () => {
     // - 「确认拒单」还能点 -> 再发一次注定 404 的拒单 + 一次刷新，
     //   用户在无限无效循环里打转。
     //
-    // 所以刷新成功就关掉弹窗，让用户回列表看最新状态。
-    // （刷新失败 = 连这单都没了 -> 弹窗留着让用户原地重试，
-    //   那是上面那条用例钉住的行为。）
+    // 所以刷新成功也关掉弹窗，让用户回列表看最新状态。
+    // 页面顶部那句文案必须**带上刷新后的真实状态**：光说「订单不存在」，
+    // 跟同屏渲染的这单自相矛盾，用户不知道该信哪个。
     mockClient.getMasterOrder
       .mockResolvedValueOnce(detail("PENDING_ACCEPT"))
       .mockResolvedValueOnce(detail("ACCEPTED"));
@@ -1053,10 +1054,15 @@ describe("订单详情页（师傅端）", () => {
     // **弹窗关掉了**：留着只会让人再点一次、再撞一次注定失败的 404
     expect(rejectPopupOpen(wrapper)).toBe(false);
 
-    // 页面顶部显示后端原话（**原样带上**）+「已刷新最新状态」
+    // 页面顶部显示后端原话（**原样带上**）+ 刷新后的真实状态
     const text = wrapper.find('[data-test="action-error-text"]').text();
     expect(text).toContain("订单不存在");
-    expect(text).toContain("已刷新最新状态");
+    expect(text).toContain("已不适用");
+    // **状态名跟页面上渲染的状态一致**（不硬编码一个字符串常量：
+    // 文案里的状态跟页面显示的不是一个东西时，用户还是懵）
+    const statusText = wrapper.find('[data-test="order-status"]').text();
+    expect(statusText).toContain("已接单");
+    expect(text).toContain(statusText);
     // 用户有出路：返回列表
     expect(wrapper.find('[data-test="back-to-list"]').exists()).toBe(true);
 
