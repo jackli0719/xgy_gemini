@@ -73,18 +73,19 @@
 
 ## 当前 commit
 
-- 本分支：`feature/UI-M1-master-orders` —— 师傅端订单列表打磨（三个工作分组），本地提交，**未 push、未开 PR**。
-- 内容：三个分组各有自己的空状态 / 骨架屏 / 出错显示后端原话 + 重试；订单卡片补地址与时间
-  （后端列表接口新增 `address_region` / `address_detail`，`make openapi` + `npm run generate:api` 已重新生成）。
-- `main` HEAD：`5f82aac perf(PERF-01): k6 load testing setup (#17)`（含 UI-01 / UI-02 / UI-02b / UI-03）
-- 本文件自身的提交见 `git log -1`（也在这个分支上，随 PR 一起合并）。
+- 本分支：`main` —— 已与 `origin/main` 同步，工作区干净。
+- `main` HEAD：`1a72aed feat(UI-M1): master order list polish (#18)`
+  （含 UI-01 / UI-02 / UI-02b / UI-03 / UI-M1 / PERF-01）
+- 下一张卡：**UI-M2 师傅订单详情操作打磨**（师傅端订单详情页的接单 / 拒单 / 开工 / 完工动作）。
+  已知要处理的点：拒单成功后订单退回「待派单」并清空承接师傅，此时详情接口会返回 404，
+  现在的实现会把整页内容换成错误提示（用户以为页面坏了）——要在本卡里改成提示「已拒单」并回到列表。
 
 ## CI 现状
 
 - **触发**：PR 到 `main`、push 到 `main` 各跑一遍；同 ref 新提交取消旧跑批。
 - **后端 job**：pytest 单元 + 集成分两轮跑；集成测试**不许静默 skip**；再单独数一遍收集到的集成用例数，低于 `EXPECTED_INTEGRATION_TESTS`（现 352）直接红。
 - **前端 job**：三个 workspace 各自 typecheck / test / build，矩阵展开成 3 个检查。
-- **最近结果**：PR #9（FE-06a 师傅端入驻申请页）绿（已合并进 `main`）；历史故意造红的验证 PR（#2）确实红过，门禁有效。
+- **最近结果**：PR #18（UI-M1 师傅端订单列表打磨）4 个检查全绿并已合并进 `main`；历史故意造红的验证 PR（#2）确实红过，门禁有效。
 - **Secrets**：`DATABASE_URL` / `TEST_DATABASE_URL` / `REDIS_URL` / `JWT_SECRET` / `POSTGRES_PASSWORD` 已配；`LOGIN_SMS_CODE` 未配（CI 里 `APP_ENV=dev`，走占位码）。
 - **分支保护**：已按 `.github/BRANCH_PROTECTION.md` 在 Settings 里配好（4 个 required status checks + 1 approval + 禁 bypass）。
 - **审查不在 CI 里**：走本地 Claude Code 审查，CI 只有一个可配的 review gate。
