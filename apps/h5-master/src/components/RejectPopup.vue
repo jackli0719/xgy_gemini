@@ -11,7 +11,8 @@
  * 这时候关弹窗（点「取消」/ 点遮罩 / 下滑）**不是撤销**，只是把结果
  * 藏起来——用户以为「取消了这单」，实际单已经被拒，用户完全不知情
  * （静默拒单）。所以 loading 为真时「取消」按钮 disabled，
- * 遮罩那条关闭路径也一并挡掉。
+ * 遮罩那条关闭路径也一并挡掉（用 Vant 的 close-on-click-overlay，
+ * 详见模板里的注释——**不能靠吞掉 update:show 事件来实现**）。
  *
  * teleport=null：内容就地渲染，不传送到 body。
  * 传送到 body 的话，测试里 wrapper 根本找不到这个弹窗的内容。
@@ -73,17 +74,6 @@ function close(): void {
   emit("update:show", false);
 }
 
-/**
- * 弹窗自己要求关闭（遮罩点击 / 下滑关闭）时的处理。
- *
- * 跟「取消」按钮走同一个判断：请求在途时**一律不许关**。
- * 只挡按钮不挡遮罩，等于留了同一个坑的另一个入口。
- */
-function onPopupShowChange(value: boolean): void {
-  if (!value && props.loading) return;
-  emit("update:show", value);
-}
-
 function confirm(): void {
   const text = reason.value.trim();
   if (!text) {
@@ -95,12 +85,28 @@ function confirm(): void {
 </script>
 
 <template>
+  <!--
+    遮罩那条关闭路径的拦截方式：**用 Vant 官方的 close-on-click-overlay**，
+    而不是「吞掉 update:show 事件」。
+
+    为什么不能吞事件：Vant 的 close() 是**先**把内部的 opened 置成 false、
+    **再** emit update:show(false)。如果我们把这个 emit 吞掉（父组件的 show
+    还是 true，弹窗照常显示），Vant 内部的 opened 却已经是 false 了。
+    而 opened 只有在 show 由假变真时才会被 open() 重置 —— 也就是说
+    **本次打开期间，遮罩那条关闭路径从此永久失效**：请求在途时点过一次
+    遮罩被挡住，等请求结束（loading 变 false）再点遮罩，弹窗纹丝不动。
+
+    改成 :close-on-click-overlay="!loading" 就没有这个问题：loading 为真时
+    Vant 根本不进 close()（opened 保持 true），loading 变回 false 后遮罩
+    又恢复正常关闭，Vant 内部状态跟 show prop 始终一致。
+  -->
   <van-popup
     :show="show"
     position="bottom"
     round
     :teleport="null"
-    @update:show="onPopupShowChange($event)"
+    :close-on-click-overlay="!loading"
+    @update:show="emit('update:show', $event)"
   >
     <div class="reject-popup" data-test="reject-popup">
       <p class="reject-popup-title">拒单原因</p>

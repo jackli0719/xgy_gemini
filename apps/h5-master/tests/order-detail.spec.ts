@@ -50,6 +50,10 @@
  * 17. **刷新详情失败要说「操作已完成」**：接单 / 开工 / 完工**已经成功**，
  *     只是随后的刷新挂了（比如这单已被收走 → GET 404）。
  *     这时报「操作失败」会让师傅以为没生效、再点一次、再撞一次 404。
+ * 18. **遮罩关闭在请求结束后仍然有效**：请求在途时点过一次遮罩（被挡住），
+ *     请求结束后再点遮罩，弹窗必须能正常关闭。Vant 内部的 opened 标志
+ *     不能跟 show prop 失同步（失同步的话，遮罩那条路径在**本次打开期间**
+ *     就永久失效了）。
  */
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,10 +108,17 @@ const EMPTY_LIST = { items: [], total: 0, limit: 20, offset: 0 };
  *
  * 所以这里看两样：show prop 还是 true，且弹窗根节点的 style 里
  * 没有 display:none。
+ *
+ * **元素不存在时要先判存在性**：van-popup 是 lazy render，弹窗**一次都
+ * 没打开过**的时候根节点根本不在 DOM 里，find 返回空 wrapper，
+ * 直接读 attributes() 会抛「Cannot call attributes on an empty DOMWrapper」
+ * —— 而这里要的是「弹窗没开着 → false」，不是抛异常。
  */
 function rejectPopupOpen(wrapper: VueWrapper): boolean {
   const popup = wrapper.findComponent(RejectPopup);
-  const rootStyle = wrapper.find(".van-popup").attributes("style") ?? "";
+  const popupEl = wrapper.find(".van-popup");
+  if (!popupEl.exists()) return false;
+  const rootStyle = popupEl.attributes("style") ?? "";
   return popup.props("show") === true && !rootStyle.includes("display: none");
 }
 
@@ -465,6 +476,72 @@ describe("订单详情页（师傅端）", () => {
       master_id: null,
     });
     await flushPromises();
+  });
+
+  it("被挡过一次遮罩后 -> 请求结束再点遮罩，弹窗仍能正常关闭", async () => {
+    // 回归：以前「请求在途不许关弹窗」是**吞掉 update:show 事件**实现的。
+    // 但 Vant 的 close() 是**先**把内部的 opened 置成 false、**再** emit
+    // update:show(false)：emit 被吞掉 -> 父组件的 show 还是 true
+    // （弹窗照常显示），可 Vant 内部的 opened 已经是 false 了。
+    // 而 opened 只有在 show 由假变真时才会被 open() 重置 —— 于是
+    // **本次打开期间遮罩那条关闭路径永久失效**：
+    // 请求在途时点过一次遮罩（被挡住），等请求结束再点遮罩，弹窗纹丝不动。
+    //
+    // 现在改成 Vant 官方的 :close-on-click-overlay="!loading"：
+    // 在途时 Vant 根本不进 close()（opened 保持 true），
+    // 请求结束后遮罩又恢复正常关闭。
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    // 请求挂住不返回（好观察「在途」这个中间态），结束后让它**失败**：
+    // 失败时弹窗留着（用户要能直接重试），loading 变回 false。
+    let fail: (err: unknown) => void = () => {};
+    mockClient.rejectOrder.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    await wrapper.find('[data-test="reject-button"]').trigger("click");
+    await flushPromises();
+    await wrapper.find('[data-test="reject-reason"] input').setValue("临时有事");
+    await wrapper.find('[data-test="reject-confirm"]').trigger("click");
+    await flushPromises();
+
+    // 请求在途：点遮罩被挡住，弹窗还开着
+    await wrapper.find(".van-overlay").trigger("click");
+    await flushPromises();
+    expect(rejectPopupOpen(wrapper)).toBe(true);
+
+    // 请求结束（失败 -> 弹窗留着重试，loading 变 false）
+    fail(new ApiError(500, "拒单失败，请稍后再试", null));
+    await flushPromises();
+    expect(rejectPopupOpen(wrapper)).toBe(true);
+
+    // **再点遮罩，弹窗能正常关闭**（这条就是回归点）
+    await wrapper.find(".van-overlay").trigger("click");
+    await flushPromises();
+    expect(rejectPopupOpen(wrapper)).toBe(false);
+    // 父组件的 show 也跟着变 false（不是只把 Vant 内部状态改了）
+    expect(wrapper.findComponent(RejectPopup).props("show")).toBe(false);
+  });
+
+  it("弹窗一次都没打开过 -> rejectPopupOpen() 返回 false（不是抛异常）", async () => {
+    // van-popup 是 lazy render：弹窗**一次都没打开过**的时候，
+    // 它的根节点根本不在 DOM 里。测试辅助函数如果直接去读那个节点的
+    // style，会抛「Cannot call attributes on an empty DOMWrapper」——
+    // 判「弹窗开没开」这种事不该把用例整个炸掉。
+    mockClient.getMasterOrder.mockResolvedValue(detail("PENDING_ACCEPT"));
+    const { pinia, router } = await setupApp("/orders/OTO20260101000001");
+    const wrapper = mount(OrderDetailView, { global: { plugins: [pinia, router] } });
+    await flushPromises();
+
+    // 还没点过「拒单」，弹窗从没打开过：根节点不在 DOM 里
+    expect(wrapper.find(".van-popup").exists()).toBe(false);
+    expect(rejectPopupOpen(wrapper)).toBe(false);
   });
 
   it("拒单失败后关掉弹窗 -> 页面顶部才给错误 + 返回列表按钮", async () => {
