@@ -168,6 +168,9 @@ def test_response_field_sets() -> None:
         "slot_start_time",
         "slot_end_time",
         "created_at",
+        # 地址在列表里也要有（UI-M1）：师傅在路上就得看地址
+        "address_region",
+        "address_detail",
     }
     assert set(MasterOrderDetail.model_fields) == set(MasterOrderItem.model_fields) | {
         "id",
@@ -461,6 +464,25 @@ async def test_list_filters_by_status(api_client, seeded) -> None:
     assert [item["order_no"] for item in in_service.json()["items"]] == [
         MY_IN_SERVICE_ORDER_NO
     ]
+
+
+@pytest.mark.integration
+async def test_list_carries_address(api_client, seeded) -> None:
+    """列表里也带上门地址（UI-M1）。
+
+    师傅在路上就要看地址，只在详情里给的话每接一单都得点一次详情。
+    地址属于**这笔订单**，订单已经被归属谓词过滤过，
+    所以列表里的地址也是自己派给我的单的地址。
+    """
+    response = await api_client.get(
+        f"{ORDERS_URL}?status=PENDING_ACCEPT",
+        headers=_my_master_header(),
+    )
+
+    assert response.status_code == 200, response.text
+    for item in response.json()["items"]:
+        assert item["address_region"] == "北京市朝阳区"
+        assert item["address_detail"] == "建国路 88 号 3 单元 501"
 
 
 @pytest.mark.integration

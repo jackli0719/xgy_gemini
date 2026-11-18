@@ -46,6 +46,13 @@ class MasterOrderItem(BaseModel):
     slot_start_time: time = Field(..., description="预约开始时间")
     slot_end_time: time = Field(..., description="预约结束时间")
     created_at: datetime = Field(..., description="下单时间")
+    # 上门地址：列表里也要给。
+    # 师傅在路上就得看地址（决定先去哪儿、怎么走），只在详情里给的话
+    # 每接一单都得多点一次详情。地址是**这笔订单**的地址，
+    # 而订单本身已经按归属谓词过滤过（Order.master_id == 我的 master_id），
+    # 所以这里不会把别人的地址发出去。
+    address_region: str = Field(..., description="地址所在区域")
+    address_detail: str = Field(..., description="详细地址")
 
 
 class MasterOrderListResponse(BaseModel):
@@ -64,9 +71,10 @@ class MasterOrderListResponse(BaseModel):
 
 
 class MasterOrderDetail(MasterOrderItem):
-    """订单详情：多了客户联系方式与上门地址。
+    """订单详情：多了客户联系方式与时段 ID。
 
-    师傅要上门服务，得知道去哪儿、找谁——所以详情里带地址与电话。
+    师傅要上门服务，得知道找谁——所以详情里带电话与称呼。
+    地址在基类里（列表也给），这里不再重复声明。
     可见范围由服务端保证：只有派给他的订单才查得到（404 同构）。
     """
 
@@ -76,8 +84,6 @@ class MasterOrderDetail(MasterOrderItem):
     slot_id: int = Field(..., description="预约时段 ID")
     customer_contact: str = Field(..., description="客户称呼")
     customer_phone: str = Field(..., description="客户电话")
-    address_region: str = Field(..., description="地址所在区域")
-    address_detail: str = Field(..., description="详细地址")
     # 完成时间：客户确认完成（或自动确认）时才写，没完成就是 null。
     completed_at: datetime | None = Field(
         default=None, description="完成时间（未完成时为 null）"

@@ -79,6 +79,10 @@ async def list_master_orders(
                 slot_start_time=row.slot_start_time,
                 slot_end_time=row.slot_end_time,
                 created_at=row.created_at,
+                # 地址也给：师傅在路上就得看地址（UI-M1）。
+                # 可见范围由 service 的归属谓词保证（只有派给我的单）。
+                address_region=row.address_region,
+                address_detail=row.address_detail,
             )
             for row in rows
         ],
